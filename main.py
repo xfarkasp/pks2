@@ -4,7 +4,7 @@ import struct
 import threading
 import time
 
-def createConnection(filename, host, port):
+def create_connection(host, port):
     try:
             # Create a socket for communication
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -33,16 +33,16 @@ def createConnection(filename, host, port):
                     type = struct.unpack('!B', header)[0]
                     if type == 1:
                         print("connection established")
+                        receiver_thread = threading.Thread(target=receive_file, args=('video.mp4', host, port));
+                        receiver_thread.start();
 
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + host)
 
-def waitForSyn(host, port):
+def wait_for_syn(host, port):
     try:
             # Create a socket for communication
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                # Connect to the server
-                s.connect((host, port))
 
                 # Bind the socket to a specific address and port
                 s.bind((host, port))
@@ -171,10 +171,18 @@ if __name__ == "__main__":
             host = input("Input reciever ip: ")
             port = int(input("Select port to operate on: "))
             folder = input("Path to save data: ")
+            # Start listener for connection
+            wait_for_syn = threading.Thread(target=wait_for_syn, args=(host, port))
+            wait_for_syn.start()
+            # Server (receiver) side
+            #receiver_thread = threading.Thread(target=receive_file, args=('video.mp4', host, port))
+            #receiver_thread.start();
+
+        if user_input == '1':
 
             # Server (receiver) side
-            receiver_thread = threading.Thread(target=receive_file, args=('C:\\Users\\pedro\\PycharmProjects\\pks2\\', host, port));
-            receiver_thread.start();
+            connection_thread = threading.Thread(target=create_connection, args=(host, port));
+            connection_thread.start();
 
         if user_input == '3':
             host = input("Input reciever ip: ")
@@ -183,7 +191,7 @@ if __name__ == "__main__":
 
             # Server (receiver) side
             sender_thread = threading.Thread(target=send_file, args=(
-            'C:\\Users\\pedro\\PycharmProjects\\pks2\\piculkovia.jpeg', host, port));
+            'video.mp4', host, port));
             sender_thread.start();
 
     # Client (sender) side with keep-alive thread
