@@ -29,7 +29,10 @@ def create_connection(host, port):
 
             if ack_type == 1:
                 print("ACK received. Connection established.")
+                keep_alive_thread = threading.Thread(target=keep_alive_sender, args=(s, 5))  # 5 seconds interval
+                keep_alive_thread.start()
                 connection_queue.put(s)  # Put the connection in the queue
+
 
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + host)
@@ -60,6 +63,9 @@ def wait_for_syn(host, port):
                     ack_header = struct.pack('!B', 1)
                     conn.sendall(ack_header)
                     print(f"ACK to SYN from {client_ip}:{client_port} sent.")
+                    # Start keep alive listener thread
+                    keep_alive_thread = threading.Thread(target=keep_alive_listener, args=(conn,))  # 5 seconds interval
+                    keep_alive_thread.start()
                     # Start file transfer listner
                     receive(conn)
 
@@ -101,49 +107,72 @@ def send_file(conn ,filename):
 
 def receive(conn):
     try:
-        with conn:
-            file_size = 0
-            while conn:
-                signal_received = False
-                print("Waiting for data")
-                while not signal_received:
-                    header_recieved = conn.recv(9)
-                    if header_recieved and len(header_recieved) == 9:
-                        print(len(header_recieved))
-                        type = struct.unpack('!BQ', header_recieved)[0]
-                        signal_received = True
 
-                if type == 5:
-                    if file_size == 0:
-                        file_size = struct.unpack('!BQ', header_recieved)[1]
+        file_size = 0
+        while conn:
+            signal_received = False
+            print("Waiting for data")
+            while not signal_received:
+                header_recieved = conn.recv(9)
+                if header_recieved and len(header_recieved) == 9:
+                    print(len(header_recieved))
+                    type = struct.unpack('!BQ', header_recieved)[0]
+                    signal_received = True
 
-                    # Open a new file for writing
-                    with open("file.jpeg", 'wb') as file:
-                        # Receive and write file data in chunks
-                        remaining_bytes = file_size
-                        chunk_size = 1024
+            if type == 5:
+                if file_size == 0:
+                    file_size = struct.unpack('!BQ', header_recieved)[1]
 
-                        while remaining_bytes > 0:
-                            print(remaining_bytes)
-                            chunk = conn.recv(min(chunk_size, remaining_bytes))
-                            if not chunk:
-                                break
-                            file.write(chunk)
-                            remaining_bytes -= len(chunk)
+                # Open a new file for writing
+                with open("file.jpeg", 'wb') as file:
+                    # Receive and write file data in chunks
+                    remaining_bytes = file_size
+                    chunk_size = 1024
 
-                    print("File received successfully.")
+                    while remaining_bytes > 0:
+                        print(remaining_bytes)
+                        chunk = conn.recv(min(chunk_size, remaining_bytes))
+                        if not chunk:
+                            break
+                        file.write(chunk)
+                        remaining_bytes -= len(chunk)
+
+                print("File received successfully.")
 
     except socket.gaierror as e:
         print(f"Error: {e}")
         print("Hostname resolution failed. Check the hostname or IP address.")
 
-def keep_alive_thread(s, interval):
-    while True:
-        time.sleep(interval)
-        try:
-            s.sendall(b'Keep alive message')
-        except AttributeError:
-            print("Error: Invalid socket object")
+def keep_alive_sender(conn, interval):
+    try:
+        while True:
+            time.sleep(interval)
+            print("Sending keep alive")
+            keep_alive_header = struct.pack('!B', 3)
+            conn.sendall(keep_alive_header)
+    except AttributeError:
+        print("Error: Invalid socket object")
+
+
+def keep_alive_listener(conn):
+    try:
+        while conn:
+            signal_received = False
+            print("Waiting for keep alive")
+            while not signal_received:
+                header_recieved = conn.recv(1)
+                print(len(header_recieved))
+                if header_recieved and len(header_recieved) == 1:
+                    type = struct.unpack('!B', header_recieved)[0]
+                    signal_received = True
+
+            if type == 3:
+                print("Keep alive received, sending ACK")
+                ack_header = struct.pack('!B', 1)
+                conn.sendall(ack_header)
+
+    except AttributeError:
+        print("Error: Invalid socket object")
 
 # Example usage:
 if __name__ == "__main__":
@@ -173,7 +202,7 @@ if __name__ == "__main__":
             # Server (receiver) side
             host = input("Select IP to connect to: ")
             port = int(input("Select the PORT of the receiver: "))
-            connection_thread = threading.Thread(target=create_connection, args=(host, port));
+            connection_thread = threading.Thread(target=create_connection, args=(host, port))
             connection_thread.start();
 
         if user_input == '3':
@@ -183,8 +212,8 @@ if __name__ == "__main__":
             if conn:
                 file = input("Path to file ")
                 # Server (receiver) side
-                sender_thread = threading.Thread(target=send_file, args=(conn , file));
-                sender_thread.start();
+                sender_thread = threading.Thread(target=send_file, args=(conn , file))
+                sender_thread.start()
 
     # Client (sender) side with keep-alive thread
     #
