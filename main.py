@@ -103,40 +103,45 @@ def send_file(filename, host, port):
         print(f"Connection refused from the host: " + host)
 
 def receive_file(filename, host, port):
-    # Create a socket for communication
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # Bind the socket to a specific address and port
-        s.bind((host, port))
+    try:
+        # Create a socket for communication
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # Bind the socket to a specific address and port
+            s.bind((host, port))
 
-        # Listen for incoming connections
-        s.listen()
+            # Listen for incoming connections
+            s.listen()
 
-        print("Waiting for a connection...")
+            print("Waiting for a connection...")
 
-        # Accept a connection from a client
-        conn, addr = s.accept()
-        with conn:
-            print("Connected by", addr)
+            # Accept a connection from a client
+            conn, addr = s.accept()
+            with conn:
+                print("Connected by", addr)
 
-            # Receive the header containing file size
-            header = conn.recv(8)
-            file_size = struct.unpack('!Q', header)[0]
+                # Receive the header containing file size
+                header = conn.recv(8)
+                file_size = struct.unpack('!Q', header)[0]
 
-            # Open a new file for writing
-            with open(filename, 'wb') as file:
-                # Receive and write file data in chunks
-                remaining_bytes = file_size
-                chunk_size = 1024
+                # Open a new file for writing
+                with open(filename, 'wb') as file:
+                    # Receive and write file data in chunks
+                    remaining_bytes = file_size
+                    chunk_size = 1024
 
-                while remaining_bytes > 0:
-                    print(remaining_bytes)
-                    chunk = conn.recv(min(chunk_size, remaining_bytes))
-                    if not chunk:
-                        break
-                    file.write(chunk)
-                    remaining_bytes -= len(chunk)
+                    while remaining_bytes > 0:
+                        print(remaining_bytes)
+                        chunk = conn.recv(min(chunk_size, remaining_bytes))
+                        if not chunk:
+                            break
+                        file.write(chunk)
+                        remaining_bytes -= len(chunk)
 
-    print("File received successfully.")
+        print("File received successfully.")
+
+    except socket.gaierror as e:
+        print(f"Error: {e}")
+        print("Hostname resolution failed. Check the hostname or IP address.")
 
 def keep_alive_thread(s, interval):
     while True:
@@ -163,7 +168,7 @@ if __name__ == "__main__":
         user_input = input("Select function: ")
         print(user_input)
         if user_input == '0':
-            #host = int(input("Input reciever ip: "))
+            host = input("Input reciever ip: ")
             port = int(input("Select port to operate on: "))
             folder = input("Path to save data: ")
 
@@ -171,14 +176,6 @@ if __name__ == "__main__":
             receiver_thread = threading.Thread(target=receive_file, args=('C:\\Users\\pedro\\PycharmProjects\\pks2\\', host, port));
             receiver_thread.start();
 
-        if user_input == '1':
-            # Server (receiver) side
-            receiver_thread = threading.Thread(target=receive_file,
-                                               args=('C:\\Users\\pedro\\PycharmProjects\\pks2\\', host, port));
-            receiver_thread.start();
-        receiver_thread = threading.Thread(target=receive_file,
-                                           args=('C:\\Users\\pedro\\PycharmProjects\\pks2\\', host, port));
-        receiver_thread.start();
         if user_input == '3':
             host = input("Input reciever ip: ")
             port = int(input("Select port to operate on: "))
