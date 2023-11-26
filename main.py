@@ -104,7 +104,7 @@ def send_file(conn ,filename, save_path):
                     break
                 conn.sendall(chunk)
 
-        print("File sent successfully.")
+        print("File sent successfully and saved to: " + save_path + filename)
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
 
@@ -163,12 +163,13 @@ def receive(conn):
                         file.write(chunk)
                         remaining_bytes -= len(chunk)
 
-                print("File received successfully.")
+                print("File received successfully to " +  received_file_path)
 
             #message_lock.release()
     except socket.gaierror as e:
         print(f"Error: {e}")
         print("Hostname resolution failed. Check the hostname or IP address.")
+
 
 def keep_alive_sender(conn, interval):
     try:
