@@ -64,7 +64,7 @@ def wait_for_syn(host, port):
                     conn.sendall(ack_header)
                     print(f"ACK to SYN from {client_ip}:{client_port} sent.")
                     # Start keep alive listener thread
-                    keep_alive_thread = threading.Thread(target=keep_alive_listener, args=(conn,))  # 5 seconds interval
+                    keep_alive_thread = threading.Thread(target=keep_alive_listener, args=(conn,))
                     keep_alive_thread.start()
                     # Start file transfer listner
                     receive(conn)
@@ -144,12 +144,15 @@ def receive(conn):
         print("Hostname resolution failed. Check the hostname or IP address.")
 
 def keep_alive_sender(conn, interval):
+    keep_alive_ack_thread = threading.Thread(target=keep_alive_listener, args=(conn,))
+    keep_alive_ack_thread.start()
     try:
         while True:
             time.sleep(interval)
             print("Sending keep alive")
             keep_alive_header = struct.pack('!B', 3)
             conn.sendall(keep_alive_header)
+
     except AttributeError:
         print("Error: Invalid socket object")
 
@@ -166,6 +169,9 @@ def keep_alive_listener(conn):
                     type = struct.unpack('!B', header_recieved)[0]
                     signal_received = True
 
+            if type == 1:
+                print("Keep alive ACK received")
+
             if type == 3:
                 print("Keep alive received, sending ACK")
                 ack_header = struct.pack('!B', 1)
@@ -174,7 +180,7 @@ def keep_alive_listener(conn):
     except AttributeError:
         print("Error: Invalid socket object")
 
-# Example usage:
+
 if __name__ == "__main__":
     # Create connection que, to pass established connection from threads
     connection_queue = Queue()
