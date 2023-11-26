@@ -5,6 +5,8 @@ import threading
 import time
 from queue import Queue
 
+# Create a lock
+message_lock = threading.Lock()
 def create_connection(host, port):
     try:
             # Create a socket for communication
@@ -29,9 +31,12 @@ def create_connection(host, port):
 
             if ack_type == 1:
                 print("ACK received. Connection established.")
-                keep_alive_thread = threading.Thread(target=keep_alive_sender, args=(s, 5))  # 5 seconds interval
-                keep_alive_thread.start()
                 connection_queue.put(s)  # Put the connection in the queue
+                # Start listener for messages
+                keep_alive_thread = threading.Thread(target=keep_alive_sender, args=(s, 5))
+                keep_alive_thread.start()
+                receive_thread = threading.Thread(target=receive, args=(s,))
+                receive_thread.start()
 
 
     except ConnectionRefusedError:
@@ -40,34 +45,33 @@ def create_connection(host, port):
 def wait_for_syn(host, port):
     try:
         # Create a socket for communication
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            # Bind the socket to a specific address and port
-            s.bind((host, port))
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Bind the socket to a specific address and port
+        s.bind((host, port))
 
-            # Listen for incoming connections
-            s.listen()
+        # Listen for incoming connections
+        s.listen()
 
-            print("Waiting for a connection...")
+        print("Waiting for a connection...")
 
-            # Accept a connection from a client
-            conn, addr = s.accept()
-            client_ip, client_port = addr
-            with conn:
-                header = conn.recv(1)
-                syn_type = struct.unpack('!B', header)[0]
+        # Accept a connection from a client
+        conn, addr = s.accept()
+        client_ip, client_port = addr
 
-                if syn_type == 0:
-                    print(f"SYN received from {client_ip}:{client_port}")
+        header = conn.recv(1)
+        syn_type = struct.unpack('!B', header)[0]
 
-                    # Send the acknowledgment (SYN-ACK)
-                    ack_header = struct.pack('!B', 1)
-                    conn.sendall(ack_header)
-                    print(f"ACK to SYN from {client_ip}:{client_port} sent.")
-                    # Start keep alive listener thread
-                    keep_alive_thread = threading.Thread(target=keep_alive_listener, args=(conn,))
-                    keep_alive_thread.start()
-                    # Start file transfer listner
-                    receive(conn)
+        if syn_type == 0:
+            print(f"SYN received from {client_ip}:{client_port}")
+
+            # Send the acknowledgment (SYN-ACK)
+            ack_header = struct.pack('!B', 1)
+            conn.sendall(ack_header)
+            print(f"ACK to SYN from {client_ip}:{client_port} sent.")
+            connection_queue.put(conn)  # Put the connection in the queue
+            # Start listener for messages
+            receive_thread = threading.Thread(target=receive, args=(conn,))
+            receive_thread.start()
 
     except ConnectionRefusedError:
         print(f"Connection refused from the host: {host}")
@@ -81,22 +85,19 @@ def send_file(conn ,filename):
         with open(filename, 'rb') as file:
             # Get the file size
             file_size = os.path.getsize(filename)
+            # Send the file size and any other metadata in the header
+            header = struct.pack('!BQ', 5, file_size)
+            conn.sendall(header)
 
-            # Create a socket for communication
-            with conn:
-                # Send the file size and any other metadata in the header
-                header = struct.pack('!BQ', 5, file_size)
-                conn.sendall(header)
+            # Define the chunk size (adjust according to your needs)
+            chunk_size = 1400
 
-                # Define the chunk size (adjust according to your needs)
-                chunk_size = 1024
-
-                # Read and send file data in chunks along with the header
-                while True:
-                    chunk = file.read(chunk_size)
-                    if not chunk:
-                        break
-                    conn.sendall(chunk)
+            # Read and send file data in chunks along with the header
+            while True:
+                chunk = file.read(chunk_size)
+                if not chunk:
+                    break
+                conn.sendall(chunk)
 
         print("File sent successfully.")
     except FileNotFoundError:
@@ -105,19 +106,33 @@ def send_file(conn ,filename):
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + host)
 
+
 def receive(conn):
     try:
 
         file_size = 0
         while conn:
             signal_received = False
-            print("Waiting for data")
+            #print("Waiting for data")
+            #message_lock.acquire()
+
+
             while not signal_received:
                 header_recieved = conn.recv(9)
                 if header_recieved and len(header_recieved) == 9:
-                    print(len(header_recieved))
+                    #print(len(header_recieved))
                     type = struct.unpack('!BQ', header_recieved)[0]
+                    #print(type)
                     signal_received = True
+
+            if type == 1:
+                ack = True
+
+            if type == 3:
+                #print("TTL")
+                keep_alive_ack_header = struct.pack('!BQ', 1, 0)
+                conn.sendall(keep_alive_ack_header)
+
 
             if type == 5:
                 if file_size == 0:
@@ -127,67 +142,42 @@ def receive(conn):
                 with open("file.jpeg", 'wb') as file:
                     # Receive and write file data in chunks
                     remaining_bytes = file_size
-                    chunk_size = 1024
+                    chunk_size = 1400
 
                     while remaining_bytes > 0:
                         print(remaining_bytes)
                         chunk = conn.recv(min(chunk_size, remaining_bytes))
                         if not chunk:
-                            break
+                            continue
                         file.write(chunk)
                         remaining_bytes -= len(chunk)
 
                 print("File received successfully.")
 
+            #message_lock.release()
     except socket.gaierror as e:
         print(f"Error: {e}")
         print("Hostname resolution failed. Check the hostname or IP address.")
 
 def keep_alive_sender(conn, interval):
-    keep_alive_ack_thread = threading.Thread(target=keep_alive_listener, args=(conn,))
-    keep_alive_ack_thread.start()
     try:
         while True:
             time.sleep(interval)
-            print("Sending keep alive")
-            keep_alive_header = struct.pack('!B', 3)
+            #print("Sending keep alive")
+            keep_alive_header = struct.pack('!BQ', 3, 0)
             conn.sendall(keep_alive_header)
 
     except AttributeError:
         print("Error: Invalid socket object")
 
 
-def keep_alive_listener(conn):
-    try:
-        while conn:
-            signal_received = False
-            print("Waiting for keep alive")
-            while not signal_received:
-                header_recieved = conn.recv(1)
-                print(len(header_recieved))
-                if header_recieved and len(header_recieved) == 1:
-                    type = struct.unpack('!B', header_recieved)[0]
-                    signal_received = True
+def gui():
 
-            if type == 1:
-                print("Keep alive ACK received")
-
-            if type == 3:
-                print("Keep alive received, sending ACK")
-                ack_header = struct.pack('!B', 1)
-                conn.sendall(ack_header)
-
-    except AttributeError:
-        print("Error: Invalid socket object")
-
-
-if __name__ == "__main__":
-    # Create connection que, to pass established connection from threads
-    connection_queue = Queue()
     host = '192.168.1.14'
     port = 12345;
+    conn = None
 
-    while(1):
+    while (1):
         print("0 = set up config")
         print("1 = start connection")
         print("2 = send text")
@@ -200,36 +190,32 @@ if __name__ == "__main__":
         if user_input == '0':
             port = int(input("Select port to operate on: "))
             # Start listener for connection
-            wait_for_syn = threading.Thread(target=wait_for_syn, args=('localhost', port))
-            wait_for_syn.start()
+            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', port))
+            wait_for_syn_thread.start()
+            wait_for_syn_thread.join()  # Wait for the thread to finish
+            conn = connection_queue.get()
 
-        if user_input == '1':
-
+        elif user_input == '1':
             # Server (receiver) side
             host = input("Select IP to connect to: ")
             port = int(input("Select the PORT of the receiver: "))
-            connection_thread = threading.Thread(target=create_connection, args=(host, port))
-            connection_thread.start();
-
-        if user_input == '3':
-            # Retrieve the connection from the queue
+            create_connection(host, port)
             conn = connection_queue.get()
+
+        elif user_input == '3':
+            # Retrieve the connection from the queue
             print(type(conn))
             if conn:
                 file = input("Path to file ")
                 # Server (receiver) side
-                sender_thread = threading.Thread(target=send_file, args=(conn , file))
-                sender_thread.start()
+                send_file(conn, file)
 
-    # Client (sender) side with keep-alive thread
-    #
-    # keep_alive_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # keep_alive_socket.connect((host, port))  # Connect to the server
-    # keep_alive_thread = threading.Thread(target=keep_alive_thread, args=(keep_alive_socket, 5))  # 5 seconds interval
-    #sender_thread.start();
-    # keep_alive_thread.start()
+        else:
+            continue
 
-    # Wait for both threads to finish
-    #
-    # keep_alive_thread.join()
-
+if __name__ == "__main__":
+    # Create connection que, to pass established connection from threads
+    connection_queue = Queue()
+    gui_thread = threading.Thread(target=gui)
+    gui_thread.start()
+    gui_thread.join()
