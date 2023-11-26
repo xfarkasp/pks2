@@ -77,16 +77,21 @@ def wait_for_syn(host, port):
         print(f"Connection refused from the host: {host}")
 
 
-def send_file(conn ,filename):
+def send_file(conn ,filename, save_path):
     try:
         header = struct.pack('!B', 5)
         conn.sendall(header)
         # Open the file in binary mode
         with open(filename, 'rb') as file:
+            header = struct.pack('!BQ', 5, 0)
+            conn.sendall(header)
+
             # Get the file size
             file_size = os.path.getsize(filename)
+            # Encode the file path into bytes using UTF-8
+            file_path_bytes = os.path.join(save_path, filename).encode('utf-8')
             # Send the file size and any other metadata in the header
-            header = struct.pack('!BQ', 5, file_size)
+            header = struct.pack(f'!B{256}sQ', 5, file_path_bytes, file_size)
             conn.sendall(header)
 
             # Define the chunk size (adjust according to your needs)
@@ -125,6 +130,7 @@ def receive(conn):
                     #print(type)
                     signal_received = True
 
+
             if type == 1:
                 ack = True
 
@@ -133,15 +139,20 @@ def receive(conn):
                 keep_alive_ack_header = struct.pack('!BQ', 1, 0)
                 conn.sendall(keep_alive_ack_header)
 
-
             if type == 5:
-                if file_size == 0:
-                    file_size = struct.unpack('!BQ', header_recieved)[1]
+                init_header = conn.recv(265)
+                type, received_file_path_bytes, received_file_size = struct.unpack(
+                    f'!B{256}sQ', init_header)
 
+                if file_size == 0:
+                    # Decode the file path from bytes using UTF-8
+                    received_file_path = received_file_path_bytes.decode('utf-8').rstrip('\x00')
+                    print("File being saved to: " + received_file_path)
+                    print("Size: " + str(received_file_size))
                 # Open a new file for writing
-                with open("file.jpeg", 'wb') as file:
+                with open(received_file_path, 'wb') as file:
                     # Receive and write file data in chunks
-                    remaining_bytes = file_size
+                    remaining_bytes = received_file_size
                     chunk_size = 1400
 
                     while remaining_bytes > 0:
@@ -206,9 +217,10 @@ def gui():
             # Retrieve the connection from the queue
             print(type(conn))
             if conn:
-                file = input("Path to file ")
+                file = input("Path to file: ")
+                save_path = input("enter path to save on remote: ")
                 # Server (receiver) side
-                send_file(conn, file)
+                send_file(conn, file, save_path)
 
         else:
             continue
