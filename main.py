@@ -13,6 +13,8 @@ local_port = 666
 remote_addr = 'localhost'
 remote_port = 0
 
+frag_size = 1469
+
 data_ack = threading.Event()
 
 def create_connection(host, port):
@@ -106,14 +108,11 @@ def send_file(conn ,filename, save_path):
         print(f"remote port: {remote_port}")
         peer = (remote_addr, remote_port)
 
-        header = create_header(5, 0, 0, str(os.path.getsize(filename)) + "|" + save_path + filename)
+        header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + save_path + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
         #Open the file in binary mode
         with open(filename, 'rb') as file:
-
-            # Define the chunk size (adjust according to your needs)
-            frag_size = 1469
 
             # Read and send file data in chunks along with the header
             while True:
@@ -145,7 +144,7 @@ def receive(conn):
             signal_received = False
 
             while not signal_received:
-                header_recieved = conn.recvfrom(1400)
+                header_recieved = conn.recvfrom(1500)
 
                 if header_recieved and len(header_recieved[0]) > 2:
                     header = decode_header(header_recieved[0])
@@ -176,19 +175,18 @@ def receive(conn):
 
                 if file_size == 0:
                     # Decode the file path from bytes using UTF-8
-                    received_file_path = parser[1]
+                    received_file_path = parser[2]
                     print("File being saved to: " + received_file_path)
-                    print("Size: " + str(parser[0]))
+                    print("Size: " + str(parser[1]))
                 # Open a new file for writing
                 with open(received_file_path, 'wb') as file:
                     # Receive and write file data in chunks
-                    remaining_bytes = int(parser[0])
-                    frag_size = frag_size = 1469
+                    remaining_bytes = int(parser[1])
 
                     while remaining_bytes > 0:
 
                         print(remaining_bytes)
-                        data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                        data_header = conn.recv(min(int(parser[0]) + 31, remaining_bytes + 31))
 
                         decoded_header = decode_header(data_header)
                         if (decoded_header[0] == 5):
@@ -239,11 +237,14 @@ def gui():
         print("2 = send text")
         print("3 = send file")
         print("4 = end connection")
-        print("5 = change fragment size")
+        print("5 = change fragment size(default = 1469)")
 
         user_input = input("Select function: ")
         print(user_input)
         if user_input == '0':
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            print(f"local ip: {local_ip}")
             port = int(input("Select port to operate on: "))
             # Start listener for connection
             wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', port))
@@ -267,6 +268,16 @@ def gui():
 
                 send_thread = threading.Thread(target=send_file, args=(conn, file, save_path))
                 send_thread.start()
+
+        elif user_input == '5':
+
+            new_frag_size = int(input("Chose new frag_size: "))
+            if new_frag_size <= 1469:
+                global frag_size
+                frag_size = new_frag_size
+            else:
+                print("frag size not supported, frag size set to default!")
+
 
         else:
             continue
