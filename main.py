@@ -101,16 +101,17 @@ def wait_for_syn(host, port):
         print(f"Connection refused from the host: {host}")
 
 
-def send_file(conn ,filename, save_path):
+def send_file(conn ,filename):
     try:
         peer_address, local_port = conn.getsockname()
         print(f"local port: {local_port}")
         print(f"remote port: {remote_port}")
         peer = (remote_addr, remote_port)
 
-        header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + save_path + filename)
+        header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
+
         #Open the file in binary mode
         with open(filename, 'rb') as file:
 
@@ -126,8 +127,8 @@ def send_file(conn ,filename, save_path):
                 print("continue sending")
                 data_ack.clear()
 
+        print(f"File {filename} sent successfully: ")
 
-        print("File sent successfully and saved to: " + save_path + filename)
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
 
@@ -166,43 +167,55 @@ def receive(conn):
                 data_ack.set()
 
             if type == 5:
-                #init_header = conn.recv(265)
-                #data_header = decode_header(init_header)
                 data = header[3].decode('utf-8')
-                print(f"Recived data: {data}")
+
                 # Split the string into two parts using the | character
                 parser = data.split('|')
+                frag_size = int(parser[0])
+                file_size = int(parser[1])
+                file_name = parser[2]
+
 
                 if file_size == 0:
                     # Decode the file path from bytes using UTF-8
-                    received_file_path = parser[2]
-                    print("File being saved to: " + received_file_path)
-                    print("Size: " + str(parser[1]))
-                # Open a new file for writing
-                with open(received_file_path, 'wb') as file:
-                    # Receive and write file data in chunks
-                    remaining_bytes = int(parser[1])
+                    print("Recived file: " + file_name)
+                    print("Size: " + str(file_size))
 
-                    while remaining_bytes > 0:
+                frag_counter = 0
+                total_frags = round(file_size / frag_size)
+                remaining_bytes = file_size
+                recived_data_bytes = b''
+                while remaining_bytes > 0:
 
-                        print(remaining_bytes)
-                        data_header = conn.recv(min(int(parser[0]) + 31, remaining_bytes + 31))
 
-                        decoded_header = decode_header(data_header)
-                        if (decoded_header[0] == 5):
-                            chunk = decoded_header[3]
-                            if not chunk:
-                                continue
-                            file.write(chunk)
-                            remaining_bytes -= len(chunk)
-                            ack_header = create_header(4, 0, 0)
-                            peer_sender = (remote_addr, remote_port)
-                            conn.sendto(ack_header, peer_sender)
-                            print("ack sent to chunk")
+                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
 
-                print("File received successfully to " +  received_file_path)
+                    decoded_header = decode_header(data_header)
+                    if (decoded_header[0] == 5):
+                        chunk = decoded_header[3]
+                        if not chunk:
+                            continue
 
-            #message_lock.release()
+                        frag_counter += 1
+                        print(f"--------------------------\n"
+                              f"Fragmet: {frag_counter}/{total_frags}\n"
+                              f"Bytes recivded: {len(chunk)}\n"
+                              f"--------------------------")
+                        recived_data_bytes += chunk
+                        remaining_bytes -= len(chunk)
+                        ack_header = create_header(4, 0, 0)
+                        peer_sender = (remote_addr, remote_port)
+                        conn.sendto(ack_header, peer_sender)
+                        print("ack sent to chunk")
+
+                save_path = input("path to save file: ")
+                # Write the bytes to a file
+                with open(save_path + file_name, 'wb') as file:
+                    file.write(recived_data_bytes)
+
+                print("File received successfully to " +  save_path + file_name)
+
+
     except socket.gaierror as e:
         print(f"Error: {e}")
         print("Hostname resolution failed. Check the hostname or IP address.")
@@ -264,9 +277,8 @@ def gui():
             print(type(conn))
             if conn:
                 file = input("Path to file: ")
-                save_path = input("enter path to save on remote: ")
 
-                send_thread = threading.Thread(target=send_file, args=(conn, file, save_path))
+                send_thread = threading.Thread(target=send_file, args=(conn, file,))
                 send_thread.start()
 
         elif user_input == '5':
