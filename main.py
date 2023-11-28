@@ -1,11 +1,8 @@
-#define PY_SSIZE_T_CLEAN
-
 import os
 import socket
-import struct
 import threading
 import time
-import crc16
+import random
 from queue import Queue
 
 local_port = 666
@@ -16,6 +13,7 @@ remote_port = 0
 frag_size = 1469
 
 data_ack = threading.Event()
+error_detected = False
 
 def create_connection(host, port):
     try:
@@ -111,7 +109,7 @@ def send_file(conn ,filename):
         header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
-
+        global error_detected, data_ack
         #Open the file in binary mode
         with open(filename, 'rb') as file:
 
@@ -122,9 +120,15 @@ def send_file(conn ,filename):
                     break
                 data_header = create_header(5, 0, 0, chunk)
                 conn.sendto(data_header, peer)
-                print("chunk sent, waiting for ack")
+                print("chunk sent, waiting for ack/nack")
                 data_ack.wait()
-                print("continue sending")
+                if error_detected is not True:
+                    print("continue sending")
+                else:
+                    print("resending last fragment")
+                    conn.sendto(data_header, peer)
+                    error_detected = False
+
                 data_ack.clear()
 
         print(f"File {filename} sent successfully: ")
@@ -141,6 +145,8 @@ def receive(conn):
         file_size = 0
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
+        peer_sender = (remote_addr, remote_port)
+        global error_detected, data_ack
         while conn:
             signal_received = False
 
@@ -156,6 +162,11 @@ def receive(conn):
             if type == 1:
                 ack = True
 
+            if type == 2:
+                print(f"NACK recived")
+                error_detected = True
+                data_ack.set()
+
             if type == 3:
                 #print("TTL")
                 keep_alive_ack_header = create_header(1, 0, 0)
@@ -163,7 +174,6 @@ def receive(conn):
 
             if(type == 4):
                 print("ack to data recv")
-                global data_ack
                 data_ack.set()
 
             if type == 5:
@@ -181,32 +191,40 @@ def receive(conn):
                     print("Recived file: " + file_name)
                     print("Size: " + str(file_size))
 
+
                 frag_counter = 0
                 total_frags = round(file_size / frag_size)
                 remaining_bytes = file_size
                 recived_data_bytes = b''
+                error_timer = 0
                 while remaining_bytes > 0:
-
-
+                    error_timer += 1
                     data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
-
                     decoded_header = decode_header(data_header)
-                    if (decoded_header[0] == 5):
-                        chunk = decoded_header[3]
-                        if not chunk:
-                            continue
+                    if error_timer == 6:
+                        decoded_header = decode_header(data_header, True)
 
-                        frag_counter += 1
-                        print(f"--------------------------\n"
-                              f"Fragmet: {frag_counter}/{total_frags}\n"
-                              f"Bytes recivded: {len(chunk)}\n"
-                              f"--------------------------")
-                        recived_data_bytes += chunk
-                        remaining_bytes -= len(chunk)
-                        ack_header = create_header(4, 0, 0)
-                        peer_sender = (remote_addr, remote_port)
-                        conn.sendto(ack_header, peer_sender)
-                        print("ack sent to chunk")
+                    if decoded_header is not None:
+                        if (decoded_header[0] == 5):
+                            chunk = decoded_header[3]
+                            if not chunk:
+                                continue
+
+                            frag_counter += 1
+                            print(f"--------------------------\n"
+                                  f"Fragmet: {frag_counter}/{total_frags}\n"
+                                  f"Bytes recivded: {len(chunk)}\n"
+                                  f"--------------------------")
+                            recived_data_bytes += chunk
+                            remaining_bytes -= len(chunk)
+                            ack_header = create_header(4, 0, 0)
+
+                            conn.sendto(ack_header, peer_sender)
+                            print("ack sent to chunk")
+                    else:
+                        nack_header = create_header(2, 0, 0)
+                        conn.sendto(nack_header, peer_sender)
+                        print("NACK sent to chunk")
 
                 save_path = input("path to save file: ")
                 # Write the bytes to a file
@@ -277,7 +295,6 @@ def gui():
             print(type(conn))
             if conn:
                 file = input("Path to file: ")
-
                 send_thread = threading.Thread(target=send_file, args=(conn, file,))
                 send_thread.start()
 
@@ -338,7 +355,7 @@ def create_header(type, seq, crc, data = None):
     return header_to_send
 
 
-def decode_header(encoded_header):
+def decode_header(encoded_header, simulate_error = False):
     # Ensure the length of the encoded header is correct
     if len(encoded_header) < 3:
         print("header to short")
@@ -354,6 +371,20 @@ def decode_header(encoded_header):
     if len(encoded_header) > 3:
         data_bits = ''.join(format(byte, '08b') for byte in encoded_header[3:])
         data_bytes = bytes([int(data_bits[i:i + 8], 2) for i in range(0, len(data_bits), 8)])
+        if(simulate_error):
+            # Randomly choose a position to change
+            position_to_change = random.randint(0, len(data_bytes) - 1)
+            # Randomly generate a new byte
+            new_byte = bytes([random.randint(0, 255)])
+            # Update the bytes at the chosen position
+            data_bytes = data_bytes[:position_to_change] + new_byte + data_bytes[position_to_change + 1:]
+
+    if(simulate_error):
+        # Randomly choose a position to invert
+        position_to_invert = random.randint(0, min(4, len(type_bits) - 1))
+        # Invert the chosen bit
+        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[ position_to_invert + 1:]
+
 
     # Decoding each component
     decoded_type = int(type_bits, 2)
@@ -362,6 +393,7 @@ def decode_header(encoded_header):
 
     if calculate_crc16(int(crc_check_bits, 2).to_bytes(1, byteorder='big') + data_bytes) != int(crc_bits, 2):
         print(f"corrupted datagram")
+        return None
 
     return decoded_type, decoded_seq, decoded_crc, data_bytes
 
