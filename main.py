@@ -1,8 +1,11 @@
+#define PY_SSIZE_T_CLEAN
+
 import os
 import socket
 import struct
 import threading
 import time
+import crc16
 from queue import Queue
 
 local_port = 666
@@ -269,23 +272,44 @@ def gui():
             continue
 
 
+def calculate_crc16(data):
+    crc = 0xFFFF
+
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc >>= 1
+                crc ^= 0xA001
+            else:
+                crc >>= 1
+
+    return crc & 0xFFFF
+
+
 def create_header(type, seq, crc, data = None):
     header = format(type, '03b')
     header += format(seq, '03b')
-    header += format(crc, '016b')
 
-    header_to_send = int(header, 2).to_bytes(3, byteorder='big')
+    crc_calculation = int(header, 2).to_bytes(1, byteorder='big')
     if data is not None:
         if isinstance(data, str):
             # Data is a string
             data = data.encode('utf-8')
-            header_to_send += data
+            crc_calculation += data
         elif isinstance(data, bytes):
             # Data is already bytes
-            header_to_send += data
+            crc_calculation += data
         else:
             # Handle other types or raise an exception
             raise ValueError("Unsupported data type")
+
+    crc16 = calculate_crc16(crc_calculation)
+    header += format(crc16, '016b')
+
+    header_to_send = int(header, 2).to_bytes(3, byteorder='big')
+    if data is not None:
+        header_to_send += data
 
     # print(f"encoded set: {int(header, 2).to_bytes(3, byteorder='big')}")
     return header_to_send
@@ -299,6 +323,7 @@ def decode_header(encoded_header):
 
     # Extracting the components from the encoded header
     bits = ''.join(format(byte, '08b') for byte in encoded_header[:3])
+    crc_check_bits = bits[:8]
     type_bits = bits[:5]
     seq_bits = bits[5:8]
     crc_bits = bits[8:24]
@@ -312,11 +337,15 @@ def decode_header(encoded_header):
     decoded_seq = int(seq_bits, 2)
     decoded_crc = int(crc_bits, 2)
 
+    if calculate_crc16(int(crc_check_bits, 2).to_bytes(1, byteorder='big') + data_bytes) != int(crc_bits, 2):
+        print(f"corrupted datagram")
+
     return decoded_type, decoded_seq, decoded_crc, data_bytes
 
 
 if __name__ == "__main__":
 
+    decode_header(create_header(5, 0, 0, "fsdafasdf"))
     # Create connection que, to pass established connection from threads
     connection_queue = Queue()
     gui_thread = threading.Thread(target=gui)
