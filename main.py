@@ -212,8 +212,12 @@ def receive(conn):
                     global fyn
                     fyn.set()
                     conn.close()
+                    connection_queue.get()
                     if was_listening:
-                        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', local_port))
+                        hostname = socket.gethostname()
+                        local_ip = socket.gethostbyname(hostname)
+                        print(f"Hostname: {hostname}")
+                        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, local_port))
                         wait_for_syn_thread.start()
                     return
 
@@ -339,7 +343,10 @@ def receive(conn):
                 connection_queue.get()
 
                 if was_listening:
-                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', local_port))
+                    hostname = socket.gethostname()
+                    local_ip = socket.gethostbyname(hostname)
+                    print(f"Hostname: {hostname}")
+                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, local_port))
                     wait_for_syn_thread.start()
                 return
 
@@ -355,6 +362,7 @@ def keep_alive_sender(conn, interval):
         peer_address, local_port = conn.getpeername()
         peer = (peer_address, local_port)
         print(f"Peer {peer[0]}:{peer[1]} ")
+        global fyn
         while True:
             if fyn.is_set():
                 return
@@ -368,6 +376,7 @@ def keep_alive_sender(conn, interval):
         print("Error: Invalid socket object")
 
     except OSError:
+        fyn.clear()
         print("Connection was ended")
         return
 
@@ -481,7 +490,7 @@ def gui():
             print(f"local ip: {local_ip}")
             port = int(input("Select port to operate on: "))
             # Start listener for connection
-            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', port))
+            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, port))
             wait_for_syn_thread.start()
             wait_for_syn_thread.join()  # Wait for the thread to finish
             conn = connection_queue.get()
