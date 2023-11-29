@@ -13,7 +13,10 @@ remote_port = 0
 frag_size = 1469
 
 data_ack = threading.Event()
+fyn = threading.Event()
+
 error_detected = False
+was_listening = False
 
 def create_connection(host, port):
     try:
@@ -61,13 +64,25 @@ def create_connection(host, port):
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + host)
 
+
+def terminate_connection(conn):
+    try:
+            peer = (remote_addr, remote_port)
+
+            fyn_header = create_header(7, 3, 0)
+            conn.sendto(fyn_header, peer)
+
+            print("Fyn message sent, Waiting for ACK message...")
+
+    except ConnectionRefusedError:
+        print(f"Connection refused from the host: " + remote_addr)
+
 def wait_for_syn(host, port):
     try:
         # Create a socket for communication
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # Bind the socket to a specific address and port
         s.bind((host, port))
-
 
         print("Waiting for a connection...")
         # Listen for incoming connections
@@ -177,7 +192,7 @@ def receive(conn):
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack
+        global error_detected, data_ack, was_listening
         while conn:
             signal_received = False
 
@@ -192,6 +207,15 @@ def receive(conn):
 
             if type == 1:
                 ack = True
+                if header[1] == 3:
+                    print("Fyn ACK received, terminating")
+                    global fyn
+                    fyn.set()
+                    conn.close()
+                    if was_listening:
+                        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', local_port))
+                        wait_for_syn_thread.start()
+                    return
 
             if type == 2:
                 print(f"NACK recived")
@@ -203,7 +227,7 @@ def receive(conn):
                 keep_alive_ack_header = create_header(1, 0, 0)
                 conn.sendto(keep_alive_ack_header, (remote_addr, remote_port))
 
-            if(type == 4):
+            if type == 4:
                 print("ack to data recv")
                 data_ack.set()
 
@@ -307,7 +331,17 @@ def receive(conn):
 
                 print(recived_data_bytes)
 
+            if type == 7:
+                print("Fyn received, sending ACK and terminating")
+                nack_header = create_header(1, 3, 0)
+                conn.sendto(nack_header, peer_sender)
+                conn.close()
+                connection_queue.get()
 
+                if was_listening:
+                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', local_port))
+                    wait_for_syn_thread.start()
+                return
 
 
     except socket.gaierror as e:
@@ -322,6 +356,8 @@ def keep_alive_sender(conn, interval):
         peer = (peer_address, local_port)
         print(f"Peer {peer[0]}:{peer[1]} ")
         while True:
+            if fyn.is_set():
+                return
 
             time.sleep(interval)
 
@@ -330,6 +366,10 @@ def keep_alive_sender(conn, interval):
 
     except AttributeError:
         print("Error: Invalid socket object")
+
+    except OSError:
+        print("Connection was ended")
+        return
 
 
 def calculate_crc16(data):
@@ -431,6 +471,7 @@ def gui():
         print("3 = send file")
         print("4 = end connection")
         print("5 = change fragment size(default = 1469)")
+        print("6 = send text")
 
         user_input = input("Select function: ")
         print(user_input)
@@ -444,6 +485,9 @@ def gui():
             wait_for_syn_thread.start()
             wait_for_syn_thread.join()  # Wait for the thread to finish
             conn = connection_queue.get()
+            connection_queue.put(conn)
+            global was_listening
+            was_listening = True
 
         elif user_input == '1':
             # Server (receiver) side
@@ -451,14 +495,26 @@ def gui():
             port = int(input("Select the PORT of the receiver: "))
             create_connection(host, port)
             conn = connection_queue.get()
+            connection_queue.put(conn)
 
         elif user_input == '3':
             # Retrieve the connection from the queue
+            print(connection_queue.__sizeof__())
+            conn = connection_queue.get()
+            connection_queue.put(conn)
             print(type(conn))
             if conn:
                 file = input("Path to file: ")
                 send_thread = threading.Thread(target=send_file, args=(conn, file,))
                 send_thread.start()
+                send_thread.join()
+
+        elif user_input == '4':
+            conn = connection_queue.get()
+            connection_queue.put(conn)
+            if conn:
+                terminate_connection(conn)
+                conn = None
 
         elif user_input == '5':
 
