@@ -99,7 +99,38 @@ def wait_for_syn(host, port):
         print(f"Connection refused from the host: {host}")
 
 
-def send_file(conn ,filename):
+def send_text(conn, message):
+
+        peer_address, local_port = conn.getsockname()
+        print(f"local port: {local_port}")
+        print(f"remote port: {remote_port}")
+        peer = (remote_addr, remote_port)
+
+        header = create_header(6, 0, 0, str(frag_size) + "|" + str(len(message)))
+
+        print(f"send header: {header}")
+        conn.sendto(header, peer)
+        tmp_message = message
+        global error_detected, data_ack
+
+
+        while tmp_message:
+            string_buffer = tmp_message[:frag_size]
+            # Update the source string by removing the characters that were read
+            tmp_message = tmp_message[frag_size:]
+            message_header = create_header(6, 0, 0, string_buffer)
+            conn.sendto(message_header, peer)
+            print("chunk sent, waiting for ack/nack")
+            data_ack.wait()
+            if error_detected is not True:
+                print("continue sending")
+            else:
+                print("resending last fragment")
+                conn.sendto(message_header, peer)
+                error_detected = False
+
+
+def send_file(conn, filename):
     try:
         peer_address, local_port = conn.getsockname()
         print(f"local port: {local_port}")
@@ -185,12 +216,10 @@ def receive(conn):
                 file_size = int(parser[1])
                 file_name = parser[2]
 
-
                 if file_size == 0:
                     # Decode the file path from bytes using UTF-8
                     print("Recived file: " + file_name)
                     print("Size: " + str(file_size))
-
 
                 frag_counter = 0
                 total_frags = round(file_size / frag_size)
@@ -233,6 +262,53 @@ def receive(conn):
 
                 print("File received successfully to " +  save_path + file_name)
 
+            if type == 6:
+                data = header[3].decode('utf-8')
+
+                # Split the string into two parts using the | character
+                parser = data.split('|')
+                frag_size = int(parser[0])
+                message_size = int(parser[1])
+
+                frag_counter = 0
+                total_frags = round(message_size / frag_size)
+                remaining_bytes = message_size
+                recived_data_bytes = b''
+                error_timer = 0
+                while remaining_bytes > 0:
+                    error_timer += 1
+                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    decoded_header = decode_header(data_header)
+                    if error_timer == 6:
+                        decoded_header = decode_header(data_header, True)
+
+                    if decoded_header is not None:
+                        if (decoded_header[0] == 6):
+                            chunk = decoded_header[3]
+                            if not chunk:
+                                continue
+
+                            frag_counter += 1
+                            print(f"--------------------------\n"
+                                  f"Fragmet: {frag_counter}/{total_frags}\n"
+                                  f"Bytes recivded: {len(chunk)}\n"
+                                  f"--------------------------")
+
+                            recived_data_bytes += chunk
+                            remaining_bytes -= len(chunk)
+                            ack_header = create_header(4, 0, 0)
+
+                            conn.sendto(ack_header, peer_sender)
+                            print("ack sent to chunk")
+                    else:
+                        nack_header = create_header(2, 0, 0)
+                        conn.sendto(nack_header, peer_sender)
+                        print("NACK sent to chunk")
+
+                print(recived_data_bytes)
+
+
+
 
     except socket.gaierror as e:
         print(f"Error: {e}")
@@ -254,62 +330,6 @@ def keep_alive_sender(conn, interval):
 
     except AttributeError:
         print("Error: Invalid socket object")
-
-
-def gui():
-
-    host = '192.168.1.14'
-    port = 12345;
-    conn = None
-
-    while (1):
-        print("0 = set up config")
-        print("1 = start connection")
-        print("2 = send text")
-        print("3 = send file")
-        print("4 = end connection")
-        print("5 = change fragment size(default = 1469)")
-
-        user_input = input("Select function: ")
-        print(user_input)
-        if user_input == '0':
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            print(f"local ip: {local_ip}")
-            port = int(input("Select port to operate on: "))
-            # Start listener for connection
-            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', port))
-            wait_for_syn_thread.start()
-            wait_for_syn_thread.join()  # Wait for the thread to finish
-            conn = connection_queue.get()
-
-        elif user_input == '1':
-            # Server (receiver) side
-            host = input("Select IP to connect to: ")
-            port = int(input("Select the PORT of the receiver: "))
-            create_connection(host, port)
-            conn = connection_queue.get()
-
-        elif user_input == '3':
-            # Retrieve the connection from the queue
-            print(type(conn))
-            if conn:
-                file = input("Path to file: ")
-                send_thread = threading.Thread(target=send_file, args=(conn, file,))
-                send_thread.start()
-
-        elif user_input == '5':
-
-            new_frag_size = int(input("Chose new frag_size: "))
-            if new_frag_size <= 1469:
-                global frag_size
-                frag_size = new_frag_size
-            else:
-                print("frag size not supported, frag size set to default!")
-
-
-        else:
-            continue
 
 
 def calculate_crc16(data):
@@ -396,6 +416,71 @@ def decode_header(encoded_header, simulate_error = False):
         return None
 
     return decoded_type, decoded_seq, decoded_crc, data_bytes
+
+
+def gui():
+
+    host = '192.168.1.14'
+    port = 12345;
+    conn = None
+
+    while (1):
+        print("0 = set up config")
+        print("1 = start connection")
+        print("2 = send text")
+        print("3 = send file")
+        print("4 = end connection")
+        print("5 = change fragment size(default = 1469)")
+
+        user_input = input("Select function: ")
+        print(user_input)
+        if user_input == '0':
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            print(f"local ip: {local_ip}")
+            port = int(input("Select port to operate on: "))
+            # Start listener for connection
+            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', port))
+            wait_for_syn_thread.start()
+            wait_for_syn_thread.join()  # Wait for the thread to finish
+            conn = connection_queue.get()
+
+        elif user_input == '1':
+            # Server (receiver) side
+            host = input("Select IP to connect to: ")
+            port = int(input("Select the PORT of the receiver: "))
+            create_connection(host, port)
+            conn = connection_queue.get()
+
+        elif user_input == '3':
+            # Retrieve the connection from the queue
+            print(type(conn))
+            if conn:
+                file = input("Path to file: ")
+                send_thread = threading.Thread(target=send_file, args=(conn, file,))
+                send_thread.start()
+
+        elif user_input == '5':
+
+            new_frag_size = int(input("Chose new frag_size: "))
+            if new_frag_size <= 1469:
+                global frag_size
+                frag_size = new_frag_size
+            else:
+                print("frag size not supported, frag size set to default!")
+
+        elif user_input == '6':
+
+            # Retrieve the connection from the queue
+            print(type(conn))
+            if conn:
+                message = input("Message to peer: ")
+                send_thread = threading.Thread(target=send_text, args=(conn, message,))
+                send_thread.start()
+
+
+        else:
+            continue
 
 
 if __name__ == "__main__":
