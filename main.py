@@ -17,6 +17,7 @@ fyn = threading.Event()
 
 error_detected = False
 was_listening = False
+data_transfer = False
 
 def create_connection(host, port):
     try:
@@ -193,7 +194,17 @@ def receive(conn):
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
         global error_detected, data_ack, was_listening
+        start_time = time.time()
         while conn:
+
+            if time.time() - start_time >= 5:
+                print("Time to live not received in 5 seconds")
+                conn.close()
+                if was_listening:
+                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', local_port))
+                    wait_for_syn_thread.start()
+                return
+
             signal_received = False
 
             while not signal_received:
@@ -206,6 +217,7 @@ def receive(conn):
 
 
             if type == 1:
+                start_time = time.time()
                 ack = True
                 if header[1] == 3:
                     print("Fyn ACK received, terminating")
@@ -223,7 +235,8 @@ def receive(conn):
                 data_ack.set()
 
             if type == 3:
-                #print("TTL")
+
+                start_time = time.time()
                 keep_alive_ack_header = create_header(1, 0, 0)
                 conn.sendto(keep_alive_ack_header, (remote_addr, remote_port))
 
@@ -344,7 +357,12 @@ def receive(conn):
                 return
 
 
+
     except socket.gaierror as e:
+        print(f"Error: {e}")
+        print("Hostname resolution failed. Check the hostname or IP address.")
+
+    except ConnectionResetError as e:
         print(f"Error: {e}")
         print("Hostname resolution failed. Check the hostname or IP address.")
 
@@ -359,10 +377,10 @@ def keep_alive_sender(conn, interval):
             if fyn.is_set():
                 return
 
-            time.sleep(interval)
-
             keep_alive_header = create_header(3, 0, 0)
             conn.sendto(keep_alive_header, peer)
+
+            time.sleep(interval)
 
     except AttributeError:
         print("Error: Invalid socket object")
@@ -481,7 +499,7 @@ def gui():
             print(f"local ip: {local_ip}")
             port = int(input("Select port to operate on: "))
             # Start listener for connection
-            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', port))
+            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, port))
             wait_for_syn_thread.start()
             wait_for_syn_thread.join()  # Wait for the thread to finish
             conn = connection_queue.get()
