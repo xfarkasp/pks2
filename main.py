@@ -19,6 +19,7 @@ frag_size = 1469
 data_ack = threading.Event()
 fyn = threading.Event()
 keep_alive_event = threading.Event()
+data_sent = threading.Event()
 
 
 error_detected = False
@@ -125,17 +126,21 @@ def wait_for_syn(host, port):
 
 
 def data_ack_timer():
-    global data_ack_time_out, data_ack
+    global data_ack_time_out, data_ack, data_sent
     start_time = time.time()
     while True:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-        if data_ack.wait(timeout=max(0, 2 - elapsed_time)):
+        if data_ack.wait(timeout=max(0, 10 - elapsed_time)):
             # Keep-alive event is set
             start_time = time.time()
 
         else:
+            if data_sent.is_set():
+                data_sent.clear()
+                return
+
             print("data ack timeout")
             data_ack_time_out = True
             data_ack.set()
@@ -152,7 +157,7 @@ def send_text(conn, message):
     print(f"send header: {header}")
     conn.sendto(header, peer)
     tmp_message = message
-    global error_detected, data_ack
+    global error_detected, data_ack, data_sent
 
     time_out_thread = threading.Thread(target = data_ack_timer)
     time_out_thread.start()
@@ -179,7 +184,7 @@ def send_text(conn, message):
             print(Fore.YELLOW +"ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
             error_detected = False
-
+    data_sent.set()
     time_out_thread.join()
 
 def send_file(conn, filename):
@@ -192,7 +197,7 @@ def send_file(conn, filename):
         header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
-        global error_detected, data_ack, data_ack_time_out
+        global error_detected, data_ack, data_ack_time_out, data_sent
 
         time_out_thread = threading.Thread(target=data_ack_timer)
         time_out_thread.start()
@@ -226,7 +231,8 @@ def send_file(conn, filename):
                 data_ack.clear()
 
         print(f"File {filename} sent successfully: ")
-
+        data_sent.set()
+        time_out_thread.join()
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
 
