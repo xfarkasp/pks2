@@ -73,12 +73,13 @@ def create_connection(host, port):
 
 def terminate_connection(conn):
     try:
-        peer = (remote_addr, remote_port)
+        if conn:
+            peer = (remote_addr, remote_port)
 
-        fyn_header = create_header(7, 3, 0)
-        conn.sendto(fyn_header, peer)
+            fyn_header = create_header(7, 3, 0)
+            conn.sendto(fyn_header, peer)
 
-        print("Fyn message sent, Waiting for ACK message...")
+            print("Fyn message sent, Waiting for ACK message...")
 
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + remote_addr)
@@ -206,7 +207,11 @@ def receive(conn):
             signal_received = False
 
             while not signal_received:
-                header_recieved = conn.recvfrom(1500)
+                try:
+                    header_recieved = conn.recvfrom(1500)
+                except OSError:
+                    print("Connection was terminated")
+                    return
 
                 if header_recieved and len(header_recieved[0]) > 2:
                     header = decode_header(header_recieved[0])
@@ -488,6 +493,7 @@ def decode_header(encoded_header, simulate_error=False):
 def keep_alive_handler():
     global keep_alive_event
     start_time = time.time()
+    conn = None
     while True:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -499,9 +505,19 @@ def keep_alive_handler():
         else:
             # 15 seconds passed without keep-alive
             print(Fore.RED + f"{elapsed_time} seconds has passed from last keep alive/ACK terminating connection")
+
+            global fyn
+            fyn.set()
             conn = connection_queue.get()
-            connection_queue.get(conn)
-            terminate_connection(conn)
+            conn.close()
+
+            print(Fore.RED + f"Connection timeout, connection terminated")
+            if was_listening:
+                hostname = socket.gethostname()
+                local_ip = socket.gethostbyname(hostname)
+                print(f"Hostname: {hostname}")
+                wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, local_port))
+                wait_for_syn_thread.start()
             return
 
 
@@ -523,9 +539,12 @@ def gui():
         print(user_input)
         if user_input == '0':
             hostname = socket.getfqdn()
-            print("IP Address:", socket.gethostbyname_ex(hostname)[2][1])
-            ip = socket.gethostbyname_ex(hostname)[2][1]
-            print(f"local ip: {ip}")
+            try:
+                print("IP Address:", socket.gethostbyname_ex(hostname)[2][1])
+                ip = socket.gethostbyname_ex(hostname)[2][1]
+                print(f"local ip: {ip}")
+            except IndexError:
+                print("Media is not connected")
 
             port = int(input("Select port to operate on: "))
             # Start listener for connection
@@ -547,10 +566,8 @@ def gui():
 
         elif user_input == '3':
             # Retrieve the connection from the queue
-            print(connection_queue.__sizeof__())
             conn = connection_queue.get()
             connection_queue.put(conn)
-            print(type(conn))
             if conn:
                 file = input("Path to file: ")
                 send_thread = threading.Thread(target=send_file, args=(conn, file,))
