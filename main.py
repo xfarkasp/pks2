@@ -200,7 +200,7 @@ def receive(conn):
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack, was_listening, keep_alive_event
+        global error_detected, data_ack, keep_alive_event
         start_time = time.time()
         while conn:
 
@@ -223,21 +223,7 @@ def receive(conn):
                 ack = True
                 if header[1] == 3:
                     print("Fyn ACK received, terminating")
-                    global fyn
-                    fyn.set()
-                    conn.close()
-                    connection_queue.get()
-                    if was_listening:
-                        try:
-                            hostname = socket.getfqdn()
-                            ip = socket.gethostbyname_ex(hostname)[2][1]
-                            print(f"local ip: {ip}")
-                        except IndexError:
-                            print("Media is not connected")
-                            return
-                        print(f"Hostname: {ip}")
-                        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
-                        wait_for_syn_thread.start()
+                    universal_termination()
                     return
 
             if type == 2:
@@ -356,20 +342,7 @@ def receive(conn):
                 print("Fyn received, sending ACK and terminating")
                 nack_header = create_header(1, 3, 0)
                 conn.sendto(nack_header, peer_sender)
-                conn.close()
-                connection_queue.get()
-
-                if was_listening:
-                    try:
-                        hostname = socket.getfqdn()
-                        ip = socket.gethostbyname_ex(hostname)[2][1]
-                        print(f"local ip: {ip}")
-                    except IndexError:
-                        print("Media is not connected")
-                        return
-                    print(f"Hostname: {ip}")
-                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
-                    wait_for_syn_thread.start()
+                universal_termination()
                 return
 
 
@@ -514,27 +487,31 @@ def keep_alive_handler():
             keep_alive_event.clear()
         else:
             # 15 seconds passed without keep-alive
+            if fyn.is_set():
+                return
+
             print(Fore.RED + f"{elapsed_time} seconds has passed from last keep alive/ACK terminating connection")
-
-            global fyn
-            fyn.set()
-            conn = connection_queue.get()
-            conn.close()
-
-            print(Fore.RED + f"Connection timeout, connection terminated")
-            if was_listening:
-                try:
-                    hostname = socket.getfqdn()
-                    ip = socket.gethostbyname_ex(hostname)[2][1]
-                    print(f"local ip: {ip}")
-                except IndexError:
-                    print("Media is not connected")
-                    return
-                print(f"Hostname: {ip}")
-                wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
-                wait_for_syn_thread.start()
+            universal_termination()
             return
 
+def universal_termination():
+    global fyn
+    fyn.set()
+    conn = connection_queue.get()
+    conn.close()
+
+    print(Fore.RED + f"Connection timeout, connection terminated" + Fore.RESET)
+    if was_listening:
+        try:
+            hostname = socket.getfqdn()
+            ip = socket.gethostbyname_ex(hostname)[2][1]
+            print(f"local ip: {ip}")
+        except IndexError:
+            print("Media is not connected")
+            return
+        print(f"Hostname: {ip}")
+        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
+        wait_for_syn_thread.start()
 
 def gui():
     host = '192.168.1.14'
