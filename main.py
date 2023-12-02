@@ -263,7 +263,11 @@ def receive(conn):
                 error_timer = 0
                 while remaining_bytes > 0:
                     error_timer += 1
-                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    try:
+                        data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    except OSError:
+                        print("connection timed out during data transfer")
+                        break
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
                     if error_timer == 6:
