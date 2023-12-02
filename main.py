@@ -376,8 +376,8 @@ def keep_alive_sender(conn, interval):
         print("Error: Invalid socket object")
 
     except OSError:
-        fyn.clear()
-        print("Connection was ended")
+        print("socket was closed")
+        universal_termination()
         return
 
 def save_file(file_name, recived_data_bytes):
@@ -489,8 +489,7 @@ def keep_alive_handler():
             # 15 seconds passed without keep-alive
             if fyn.is_set():
                 return
-
-            print(Fore.RED + f"{elapsed_time} seconds has passed from last keep alive/ACK terminating connection")
+            print(Fore.RED + f"{current_time - start_time} seconds has passed from last keep alive/ACK terminating connection")
             universal_termination()
             return
 
@@ -512,6 +511,7 @@ def universal_termination():
         print(f"Hostname: {ip}")
         wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
         wait_for_syn_thread.start()
+        fyn.clear()
 
 def gui():
     host = '192.168.1.14'
