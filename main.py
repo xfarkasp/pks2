@@ -343,8 +343,13 @@ def receive(conn):
                             remaining_bytes -= len(chunk)
                             ack_header = create_header(4, 0, 0)
 
-                            conn.sendto(ack_header, peer_sender)
-                            print("ack sent to chunk")
+                            try:
+                                conn.sendto(ack_header, peer_sender)
+                                print("ACK sent to chunk")
+                            except OSError:
+                                print("Connection timed out during ACK. Resending last fragment.")
+                                conn.sendto(data_header, peer)
+                                continue  # Retry sending the ACK
                     else:
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
