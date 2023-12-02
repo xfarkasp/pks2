@@ -5,7 +5,6 @@ import time
 import random
 from queue import Queue
 from colorama import Fore, init
-
 init()
 
 local_port = 666
@@ -13,15 +12,19 @@ local_port = 666
 remote_addr = 'localhost'
 remote_port = 0
 
+
 frag_size = 1469
+
 
 data_ack = threading.Event()
 fyn = threading.Event()
 keep_alive_event = threading.Event()
 
+
 error_detected = False
 was_listening = False
 data_transfer = False
+data_ack_time_out = False
 
 
 def create_connection(host, port):
@@ -121,6 +124,22 @@ def wait_for_syn(host, port):
         print(f"Connection refused from the host: {host}")
 
 
+def data_ack_timer():
+    global data_ack_time_out, data_ack
+    start_time = time.time()
+    while True:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+
+        if data_ack.wait(timeout=max(0, 5 - elapsed_time)):
+            # Keep-alive event is set
+            start_time = time.time()
+
+        else:
+            data_ack_time_out = True
+            data_ack.set()
+
+
 def send_text(conn, message):
     peer_address, local_port = conn.getsockname()
     print(f"local port: {local_port}")
@@ -134,6 +153,9 @@ def send_text(conn, message):
     tmp_message = message
     global error_detected, data_ack
 
+    time_out_thread = threading.Thread(target = data_ack_timer)
+    time_out_thread.start()
+
     while tmp_message:
         string_buffer = tmp_message[:frag_size]
         # Update the source string by removing the characters that were read
@@ -143,12 +165,13 @@ def send_text(conn, message):
         print("chunk sent, waiting for ack/nack")
         data_ack.wait()
         if error_detected is not True:
-            print("continue sending")
+            print(Fore.GREEN + "continue sending" + Fore.RESET)
         else:
-            print("resending last fragment")
+            print(Fore.YELLOW +"ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
             error_detected = False
 
+    time_out_thread.join()
 
 def send_file(conn, filename):
     try:
@@ -160,7 +183,7 @@ def send_file(conn, filename):
         header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
-        global error_detected, data_ack
+        global error_detected, data_ack, data_ack_time_out
         # Open the file in binary mode
         with open(filename, 'rb') as file:
 
@@ -175,8 +198,11 @@ def send_file(conn, filename):
                 data_ack.wait()
                 if error_detected is not True:
                     print("continue sending")
+                elif data_ack_time_out is True:
+                    print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
+                    conn.sendto(data_header, peer)
                 else:
-                    print("resending last fragment")
+                    print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
                     conn.sendto(data_header, peer)
                     error_detected = False
 
