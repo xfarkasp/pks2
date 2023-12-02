@@ -132,7 +132,7 @@ def data_ack_timer():
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-        if data_ack.wait(timeout=max(0, 10 - elapsed_time)):
+        if data_ack.wait(timeout=max(0, 1 - elapsed_time)):
             # Keep-alive event is set
             start_time = time.time()
 
@@ -145,6 +145,7 @@ def data_ack_timer():
             data_ack_time_out = True
             data_ack.set()
 
+        time.sleep(0.1)
 
 def send_text(conn, message):
     peer_address, local_port = conn.getsockname()
@@ -217,16 +218,19 @@ def send_file(conn, filename):
                     return
                 print("chunk sent, waiting for ack/nack")
                 data_ack.wait()
-                if error_detected is not True:
+                if error_detected is not True and data_ack_time_out is not True:
                     print("continue sending")
                 elif data_ack_time_out is True:
-                    print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
-                    conn.sendto(data_header, peer)
-                    data_ack_time_out = False
+                    while data_ack_time_out is True:
+                        print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
+                        conn.sendto(data_header, peer)
+                        time.sleep(1)
+
                 else:
                     print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
                     conn.sendto(data_header, peer)
                     error_detected = False
+
 
                 data_ack.clear()
 
@@ -249,7 +253,7 @@ def receive(conn):
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack, keep_alive_event
+        global error_detected, data_ack, keep_alive_event, data_ack_time_out
         start_time = time.time()
         while conn:
 
@@ -289,6 +293,7 @@ def receive(conn):
             if type == 4:
                 keep_alive_event.set()
                 print("ack to data recv")
+                data_ack_time_out = False
                 data_ack.set()
 
             if type == 5:
