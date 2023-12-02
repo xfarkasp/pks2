@@ -485,27 +485,24 @@ def decode_header(encoded_header, simulate_error=False):
     return decoded_type, decoded_seq, decoded_crc, data_bytes
 
 
-def keep_alive_timer(start_time):
-    current_time = time.time()
-    elapsed_time = current_time - start_time
-    return elapsed_time >= 5
-
-
 def keep_alive_handler():
     global keep_alive_event
     start_time = time.time()
-    current_time = time.time()
-    elapsed_time = current_time - start_time
-    while (elapsed_time <= 6):
-        if keep_alive_event.is_set():
-            start_time = time.time()
-            elapsed_time = current_time - start_time
-            keep_alive_event.clear()
-
+    while True:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-    print(Fore.RED + f"{elapsed_time} seconds has passed from last keep alive/ ACK")
+        if keep_alive_event.wait(timeout=max(0, 15 - elapsed_time)):
+            # Keep-alive event is set
+            start_time = time.time()
+            keep_alive_event.clear()
+        else:
+            # 15 seconds passed without keep-alive
+            print(Fore.RED + f"{elapsed_time} seconds has passed from last keep alive/ACK terminating connection")
+            conn = connection_queue.get()
+            connection_queue.get(conn)
+            terminate_connection(conn)
+            return
 
 
 def gui():
