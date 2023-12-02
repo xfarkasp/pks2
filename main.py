@@ -522,12 +522,14 @@ def gui():
         user_input = input("Select function: ")
         print(user_input)
         if user_input == '0':
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            print(f"local ip: {local_ip}")
+            hostname = socket.getfqdn()
+            print("IP Address:", socket.gethostbyname_ex(hostname)[2][1])
+            ip = socket.gethostbyname_ex(hostname)[2][1]
+            print(f"local ip: {ip}")
+
             port = int(input("Select port to operate on: "))
             # Start listener for connection
-            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, port))
+            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, port))
             wait_for_syn_thread.start()
             wait_for_syn_thread.join()  # Wait for the thread to finish
             conn = connection_queue.get()
