@@ -4,6 +4,9 @@ import threading
 import time
 import random
 from queue import Queue
+from colorama import Fore, init
+
+init()
 
 local_port = 666
 
@@ -189,21 +192,16 @@ def send_file(conn, filename):
 
 def receive(conn):
     try:
+        keep_alive_lis_thread = threading.Thread(target=keep_alive_handler)
+        keep_alive_lis_thread.start()
+
         file_size = 0
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack, was_listening
+        global error_detected, data_ack, was_listening, keep_alive_event
         start_time = time.time()
         while conn:
-
-            if time.time() - start_time >= 5:
-                print("Time to live not received in 5 seconds")
-                conn.close()
-                if was_listening:
-                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=('localhost', local_port))
-                    wait_for_syn_thread.start()
-                return
 
             signal_received = False
 
@@ -216,7 +214,7 @@ def receive(conn):
                     signal_received = True
 
             if type == 1:
-                start_time = time.time()
+                keep_alive_event.set()
                 ack = True
                 if header[1] == 3:
                     print("Fyn ACK received, terminating")
@@ -238,11 +236,13 @@ def receive(conn):
                 data_ack.set()
 
             if type == 3:
+                keep_alive_event.set()
                 start_time = time.time()
                 keep_alive_ack_header = create_header(1, 0, 0)
                 conn.sendto(keep_alive_ack_header, (remote_addr, remote_port))
 
             if type == 4:
+                keep_alive_event.set()
                 print("ack to data recv")
                 data_ack.set()
 
@@ -269,6 +269,7 @@ def receive(conn):
                     error_timer += 1
                     data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     decoded_header = decode_header(data_header)
+                    keep_alive_event.set()
                     if error_timer == 6:
                         decoded_header = decode_header(data_header, True)
 
@@ -503,7 +504,7 @@ def keep_alive_handler():
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-    print(f"{elapsed_time} seconds has passed from last keep alive/ ACK")
+    print(Fore.RED + f"{elapsed_time} seconds has passed from last keep alive/ ACK")
 
 
 def gui():
@@ -586,17 +587,6 @@ def gui():
 
 
 if __name__ == "__main__":
-
-    start_time = time.time()
-    current_time = time.time()
-    elapsed_time = current_time - start_time
-    while (elapsed_time <= 4):
-        current_time = time.time()
-        elapsed_time = current_time - start_time
-
-    keep_alive_event.set()
-    print(f"{elapsed_time} seconds has passed from last sent keep alive/ ACK")
-
     # Create connection que, to pass established connection from threads
     connection_queue = Queue()
     gui_thread = threading.Thread(target=gui)
