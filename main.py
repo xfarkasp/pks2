@@ -147,6 +147,7 @@ def data_ack_timer():
 
         time.sleep(0.1)
 
+
 def send_text(conn, message):
     peer_address, local_port = conn.getsockname()
     print(f"local port: {local_port}")
@@ -218,9 +219,11 @@ def send_file(conn, filename):
                     return
                 print("chunk sent, waiting for ack/nack")
                 data_ack.wait()
+
                 if error_detected is not True and data_ack_time_out is not True:
                     print("continue sending")
-                elif data_ack_time_out is True:
+
+                elif data_ack_time_out is True and data_sent is not True:
                     while data_ack_time_out is True:
                         print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
                         conn.sendto(data_header, peer)
@@ -231,7 +234,7 @@ def send_file(conn, filename):
                     conn.sendto(data_header, peer)
                     error_detected = False
 
-
+                data_ack_time_out = False
                 data_ack.clear()
 
         print(f"File {filename} sent successfully: ")
@@ -253,7 +256,7 @@ def receive(conn):
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack, keep_alive_event, data_ack_time_out
+        global error_detected, data_ack, keep_alive_event, data_ack_time_out, data_sent
         start_time = time.time()
         while conn:
 
@@ -354,6 +357,8 @@ def receive(conn):
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
+
+                data_sent.set()
                 save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
                 save_thread.start()
 
