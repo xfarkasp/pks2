@@ -377,7 +377,6 @@ def keep_alive_sender(conn, interval):
 
     except OSError:
         print("socket was closed")
-        universal_termination()
         return
 
 def save_file(file_name, recived_data_bytes):
