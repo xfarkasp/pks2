@@ -473,9 +473,10 @@ def decode_header(encoded_header, simulate_error=False):
 
 
 def keep_alive_handler():
-    global keep_alive_event
+    global keep_alive_event, fyn
     start_time = time.time()
     conn = None
+    fyn.clear()
     while True:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -510,7 +511,7 @@ def universal_termination():
         print(f"Hostname: {ip}")
         wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
         wait_for_syn_thread.start()
-        fyn.clear()
+
 
 def gui():
     host = '192.168.1.14'
