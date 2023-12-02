@@ -228,10 +228,15 @@ def receive(conn):
                     conn.close()
                     connection_queue.get()
                     if was_listening:
-                        hostname = socket.gethostname()
-                        local_ip = socket.gethostbyname(hostname)
-                        print(f"Hostname: {hostname}")
-                        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, local_port))
+                        try:
+                            hostname = socket.getfqdn()
+                            ip = socket.gethostbyname_ex(hostname)[2][1]
+                            print(f"local ip: {ip}")
+                        except IndexError:
+                            print("Media is not connected")
+                            return
+                        print(f"Hostname: {ip}")
+                        wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
                         wait_for_syn_thread.start()
                     return
 
@@ -355,10 +360,15 @@ def receive(conn):
                 connection_queue.get()
 
                 if was_listening:
-                    hostname = socket.gethostname()
-                    local_ip = socket.gethostbyname(hostname)
-                    print(f"Hostname: {hostname}")
-                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, local_port))
+                    try:
+                        hostname = socket.getfqdn()
+                        ip = socket.gethostbyname_ex(hostname)[2][1]
+                        print(f"local ip: {ip}")
+                    except IndexError:
+                        print("Media is not connected")
+                        return
+                    print(f"Hostname: {ip}")
+                    wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
                     wait_for_syn_thread.start()
                 return
 
@@ -513,10 +523,15 @@ def keep_alive_handler():
 
             print(Fore.RED + f"Connection timeout, connection terminated")
             if was_listening:
-                hostname = socket.gethostname()
-                local_ip = socket.gethostbyname(hostname)
-                print(f"Hostname: {hostname}")
-                wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(local_ip, local_port))
+                try:
+                    hostname = socket.getfqdn()
+                    ip = socket.gethostbyname_ex(hostname)[2][1]
+                    print(f"local ip: {ip}")
+                except IndexError:
+                    print("Media is not connected")
+                    return
+                print(f"Hostname: {ip}")
+                wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, local_port))
                 wait_for_syn_thread.start()
             return
 
@@ -540,21 +555,19 @@ def gui():
         if user_input == '0':
             hostname = socket.getfqdn()
             try:
-                print("IP Address:", socket.gethostbyname_ex(hostname)[2][1])
                 ip = socket.gethostbyname_ex(hostname)[2][1]
                 print(f"local ip: {ip}")
+                port = int(input("Select port to operate on: "))
+                # Start listener for connection
+                wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, port))
+                wait_for_syn_thread.start()
+                wait_for_syn_thread.join()  # Wait for the thread to finish
+                conn = connection_queue.get()
+                connection_queue.put(conn)
+                global was_listening
+                was_listening = True
             except IndexError:
                 print("Media is not connected")
-
-            port = int(input("Select port to operate on: "))
-            # Start listener for connection
-            wait_for_syn_thread = threading.Thread(target=wait_for_syn, args=(ip, port))
-            wait_for_syn_thread.start()
-            wait_for_syn_thread.join()  # Wait for the thread to finish
-            conn = connection_queue.get()
-            connection_queue.put(conn)
-            global was_listening
-            was_listening = True
 
         elif user_input == '1':
             # Server (receiver) side
