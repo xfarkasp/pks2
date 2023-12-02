@@ -131,11 +131,12 @@ def data_ack_timer():
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-        if data_ack.wait(timeout=max(0, 5 - elapsed_time)):
+        if data_ack.wait(timeout=max(0, 2 - elapsed_time)):
             # Keep-alive event is set
             start_time = time.time()
 
         else:
+            print("data ack timeout")
             data_ack_time_out = True
             data_ack.set()
 
@@ -161,7 +162,11 @@ def send_text(conn, message):
         # Update the source string by removing the characters that were read
         tmp_message = tmp_message[frag_size:]
         message_header = create_header(6, 0, 0, string_buffer)
-        conn.sendto(message_header, peer)
+        try:
+            conn.sendto(message_header, peer)
+        except OSError:
+            print("connection was closed during transfer")
+            return
         print("chunk sent, waiting for ack/nack")
         data_ack.wait()
         if error_detected is not True:
@@ -184,6 +189,9 @@ def send_file(conn, filename):
         print(f"send header: {header}")
         conn.sendto(header, peer)
         global error_detected, data_ack, data_ack_time_out
+
+        time_out_thread = threading.Thread(target=data_ack_timer)
+        time_out_thread.start()
         # Open the file in binary mode
         with open(filename, 'rb') as file:
 
@@ -193,7 +201,11 @@ def send_file(conn, filename):
                 if not chunk:
                     break
                 data_header = create_header(5, 0, 0, chunk)
-                conn.sendto(data_header, peer)
+                try:
+                    conn.sendto(data_header, peer)
+                except OSError:
+                    print("connection was closed during transfer")
+                    return
                 print("chunk sent, waiting for ack/nack")
                 data_ack.wait()
                 if error_detected is not True:
@@ -289,7 +301,12 @@ def receive(conn):
                 error_timer = 0
                 while remaining_bytes > 0:
                     error_timer += 1
-                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    try:
+                        data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    except OSError:
+                        print("connection timed out during data transfer")
+                        return
+
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
                     if error_timer == 6:
