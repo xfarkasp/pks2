@@ -171,6 +171,10 @@ def send_text(conn, message):
         data_ack.wait()
         if error_detected is not True:
             print(Fore.GREEN + "continue sending" + Fore.RESET)
+        elif data_ack_time_out is True:
+            print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
+            conn.sendto(data_header, peer)
+            data_ack_time_out = False
         else:
             print(Fore.YELLOW +"ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
@@ -213,6 +217,7 @@ def send_file(conn, filename):
                 elif data_ack_time_out is True:
                     print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
                     conn.sendto(data_header, peer)
+                    data_ack_time_out = False
                 else:
                     print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
                     conn.sendto(data_header, peer)
