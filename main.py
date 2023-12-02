@@ -294,13 +294,8 @@ def receive(conn):
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
-
-                save_path = input("path to save file: ")
-                # Write the bytes to a file
-                with open(save_path + file_name, 'wb') as file:
-                    file.write(recived_data_bytes)
-
-                print("File received successfully to " + save_path + file_name)
+                save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
+                save_thread.start()
 
             if type == 6:
                 data = header[3].decode('utf-8')
@@ -397,6 +392,13 @@ def keep_alive_sender(conn, interval):
         print("Connection was ended")
         return
 
+def save_file(file_name, recived_data_bytes):
+    save_path = input("path to save file: ")
+    # Write the bytes to a file
+    with open(save_path + file_name, 'wb') as file:
+        file.write(recived_data_bytes)
+
+    print("File received successfully to " + save_path + file_name)
 
 def calculate_crc16(data):
     crc = 0xFFFF
@@ -469,8 +471,7 @@ def decode_header(encoded_header, simulate_error=False):
         # Randomly choose a position to invert
         position_to_invert = random.randint(0, min(4, len(type_bits) - 1))
         # Invert the chosen bit
-        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[
-                                                                                                              position_to_invert + 1:]
+        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[position_to_invert + 1:]
 
     # Decoding each component
     decoded_type = int(type_bits, 2)
