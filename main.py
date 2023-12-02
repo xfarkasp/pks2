@@ -363,6 +363,7 @@ def keep_alive_sender(conn, interval):
         peer = (peer_address, local_port)
         print(f"Peer {peer[0]}:{peer[1]} ")
         global fyn
+        fyn.clear()
         while True:
             if fyn.is_set():
                 return
