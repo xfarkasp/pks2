@@ -14,52 +14,54 @@ frag_size = 1469
 
 data_ack = threading.Event()
 fyn = threading.Event()
+keep_alive_event = threading.Event()
 
 error_detected = False
 was_listening = False
 data_transfer = False
 
+
 def create_connection(host, port):
     try:
-            # Create a socket for communication
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Connect to the server
-            s.connect((host, port))
+        # Create a socket for communication
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Connect to the server
+        s.connect((host, port))
 
-            peer = (host, port)
+        peer = (host, port)
 
-            header = create_header(0, 0, 0)
+        header = create_header(0, 0, 0)
 
-            s.sendto(header, peer)
-            print("Syn sent.")
+        s.sendto(header, peer)
+        print("Syn sent.")
 
-            print("Waiting for ACK message...")
+        print("Waiting for ACK message...")
 
-            # Receive the acknowledgment
-            ack_header = s.recv(22)
-            if not ack_header:
-                print("Error: No data received or connection closed.")
-            else:
-                #ack_type = struct.unpack('!B', ack_header)[0]
-                ack_type = decode_header(ack_header)
-                print(f"Acknowledgment type: {ack_type}")
+        # Receive the acknowledgment
+        ack_header = s.recv(22)
+        if not ack_header:
+            print("Error: No data received or connection closed.")
+        else:
+            # ack_type = struct.unpack('!B', ack_header)[0]
+            ack_type = decode_header(ack_header)
+            print(f"Acknowledgment type: {ack_type}")
 
-            if ack_type[0] == 1:
-                print("ACK received. Connection established.")
-                connection_queue.put(s)  # Put the connection in the queue
+        if ack_type[0] == 1:
+            print("ACK received. Connection established.")
+            connection_queue.put(s)  # Put the connection in the queue
 
-                # Get the address and port from the socket object
-                peer_address, peer_port = s.getpeername()
-                global remote_addr, remote_port
-                remote_addr = peer_address
-                remote_port = peer_port
-                print(f"remote_addr{remote_addr}:{remote_port}")
+            # Get the address and port from the socket object
+            peer_address, peer_port = s.getpeername()
+            global remote_addr, remote_port
+            remote_addr = peer_address
+            remote_port = peer_port
+            print(f"remote_addr{remote_addr}:{remote_port}")
 
-                # Start listener for messages
-                keep_alive_thread = threading.Thread(target=keep_alive_sender, args=(s, 5))
-                keep_alive_thread.start()
-                receive_thread = threading.Thread(target=receive, args=(s,))
-                receive_thread.start()
+            # Start listener for messages
+            keep_alive_thread = threading.Thread(target=keep_alive_sender, args=(s, 5))
+            keep_alive_thread.start()
+            receive_thread = threading.Thread(target=receive, args=(s,))
+            receive_thread.start()
 
 
     except ConnectionRefusedError:
@@ -68,15 +70,16 @@ def create_connection(host, port):
 
 def terminate_connection(conn):
     try:
-            peer = (remote_addr, remote_port)
+        peer = (remote_addr, remote_port)
 
-            fyn_header = create_header(7, 3, 0)
-            conn.sendto(fyn_header, peer)
+        fyn_header = create_header(7, 3, 0)
+        conn.sendto(fyn_header, peer)
 
-            print("Fyn message sent, Waiting for ACK message...")
+        print("Fyn message sent, Waiting for ACK message...")
 
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + remote_addr)
+
 
 def wait_for_syn(host, port):
     try:
@@ -95,14 +98,13 @@ def wait_for_syn(host, port):
         remote_port = addr[1]
         print(f"remote_addr{remote_addr}:{remote_port}")
 
-
-        #syn_type = struct.unpack('!B', header)[0]
+        # syn_type = struct.unpack('!B', header)[0]
         syn_type = decode_header(header)
         print(syn_type[0])
         if syn_type[0] == 0:
             print(f"SYN received from {addr}")
             # Send the acknowledgment (SYN-ACK)
-            #ack_header = struct.pack('!B', 1)
+            # ack_header = struct.pack('!B', 1)
             ack_header = create_header(1, 0, 0)
             s.sendto(ack_header, addr)
             print(f"ACK to SYN from {addr} sent.")
@@ -116,34 +118,32 @@ def wait_for_syn(host, port):
 
 
 def send_text(conn, message):
+    peer_address, local_port = conn.getsockname()
+    print(f"local port: {local_port}")
+    print(f"remote port: {remote_port}")
+    peer = (remote_addr, remote_port)
 
-        peer_address, local_port = conn.getsockname()
-        print(f"local port: {local_port}")
-        print(f"remote port: {remote_port}")
-        peer = (remote_addr, remote_port)
+    header = create_header(6, 0, 0, str(frag_size) + "|" + str(len(message)))
 
-        header = create_header(6, 0, 0, str(frag_size) + "|" + str(len(message)))
+    print(f"send header: {header}")
+    conn.sendto(header, peer)
+    tmp_message = message
+    global error_detected, data_ack
 
-        print(f"send header: {header}")
-        conn.sendto(header, peer)
-        tmp_message = message
-        global error_detected, data_ack
-
-
-        while tmp_message:
-            string_buffer = tmp_message[:frag_size]
-            # Update the source string by removing the characters that were read
-            tmp_message = tmp_message[frag_size:]
-            message_header = create_header(6, 0, 0, string_buffer)
+    while tmp_message:
+        string_buffer = tmp_message[:frag_size]
+        # Update the source string by removing the characters that were read
+        tmp_message = tmp_message[frag_size:]
+        message_header = create_header(6, 0, 0, string_buffer)
+        conn.sendto(message_header, peer)
+        print("chunk sent, waiting for ack/nack")
+        data_ack.wait()
+        if error_detected is not True:
+            print("continue sending")
+        else:
+            print("resending last fragment")
             conn.sendto(message_header, peer)
-            print("chunk sent, waiting for ack/nack")
-            data_ack.wait()
-            if error_detected is not True:
-                print("continue sending")
-            else:
-                print("resending last fragment")
-                conn.sendto(message_header, peer)
-                error_detected = False
+            error_detected = False
 
 
 def send_file(conn, filename):
@@ -157,7 +157,7 @@ def send_file(conn, filename):
         print(f"send header: {header}")
         conn.sendto(header, peer)
         global error_detected, data_ack
-        #Open the file in binary mode
+        # Open the file in binary mode
         with open(filename, 'rb') as file:
 
             # Read and send file data in chunks along with the header
@@ -215,7 +215,6 @@ def receive(conn):
                     type = header[0]
                     signal_received = True
 
-
             if type == 1:
                 start_time = time.time()
                 ack = True
@@ -239,7 +238,6 @@ def receive(conn):
                 data_ack.set()
 
             if type == 3:
-
                 start_time = time.time()
                 keep_alive_ack_header = create_header(1, 0, 0)
                 conn.sendto(keep_alive_ack_header, (remote_addr, remote_port))
@@ -301,7 +299,7 @@ def receive(conn):
                 with open(save_path + file_name, 'wb') as file:
                     file.write(recived_data_bytes)
 
-                print("File received successfully to " +  save_path + file_name)
+                print("File received successfully to " + save_path + file_name)
 
             if type == 6:
                 data = header[3].decode('utf-8')
@@ -414,7 +412,7 @@ def calculate_crc16(data):
     return crc & 0xFFFF
 
 
-def create_header(type, seq, crc, data = None):
+def create_header(type, seq, crc, data=None):
     header = format(type, '03b')
     header += format(seq, '03b')
 
@@ -442,7 +440,7 @@ def create_header(type, seq, crc, data = None):
     return header_to_send
 
 
-def decode_header(encoded_header, simulate_error = False):
+def decode_header(encoded_header, simulate_error=False):
     # Ensure the length of the encoded header is correct
     if len(encoded_header) < 3:
         print("header to short")
@@ -458,7 +456,7 @@ def decode_header(encoded_header, simulate_error = False):
     if len(encoded_header) > 3:
         data_bits = ''.join(format(byte, '08b') for byte in encoded_header[3:])
         data_bytes = bytes([int(data_bits[i:i + 8], 2) for i in range(0, len(data_bits), 8)])
-        if(simulate_error):
+        if (simulate_error):
             # Randomly choose a position to change
             position_to_change = random.randint(0, len(data_bytes) - 1)
             # Randomly generate a new byte
@@ -466,12 +464,12 @@ def decode_header(encoded_header, simulate_error = False):
             # Update the bytes at the chosen position
             data_bytes = data_bytes[:position_to_change] + new_byte + data_bytes[position_to_change + 1:]
 
-    if(simulate_error):
+    if (simulate_error):
         # Randomly choose a position to invert
         position_to_invert = random.randint(0, min(4, len(type_bits) - 1))
         # Invert the chosen bit
-        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[ position_to_invert + 1:]
-
+        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[
+                                                                                                              position_to_invert + 1:]
 
     # Decoding each component
     decoded_type = int(type_bits, 2)
@@ -485,8 +483,30 @@ def decode_header(encoded_header, simulate_error = False):
     return decoded_type, decoded_seq, decoded_crc, data_bytes
 
 
-def gui():
+def keep_alive_timer(start_time):
+    current_time = time.time()
+    elapsed_time = current_time - start_time
+    return elapsed_time >= 5
 
+
+def keep_alive_handler():
+    global keep_alive_event
+    start_time = time.time()
+    current_time = time.time()
+    elapsed_time = current_time - start_time
+    while (elapsed_time <= 6):
+        if keep_alive_event.is_set():
+            start_time = time.time()
+            elapsed_time = current_time - start_time
+            keep_alive_event.clear()
+
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+
+    print(f"{elapsed_time} seconds has passed from last keep alive/ ACK")
+
+
+def gui():
     host = '192.168.1.14'
     port = 12345;
     conn = None
@@ -561,14 +581,22 @@ def gui():
                 send_thread = threading.Thread(target=send_text, args=(conn, message,))
                 send_thread.start()
 
-
         else:
             continue
 
 
 if __name__ == "__main__":
 
-    decode_header(create_header(5, 0, 0, "fsdafasdf"))
+    start_time = time.time()
+    current_time = time.time()
+    elapsed_time = current_time - start_time
+    while (elapsed_time <= 4):
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+
+    keep_alive_event.set()
+    print(f"{elapsed_time} seconds has passed from last sent keep alive/ ACK")
+
     # Create connection que, to pass established connection from threads
     connection_queue = Queue()
     gui_thread = threading.Thread(target=gui)
