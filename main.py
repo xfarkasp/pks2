@@ -180,7 +180,7 @@ def send_text(conn, message):
             print(Fore.GREEN + "continue sending" + Fore.RESET)
         elif data_ack_time_out is True:
             print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
-            conn.sendto(data_header, peer)
+            conn.sendto(message_header, peer)
             data_ack_time_out = False
         else:
             print(Fore.YELLOW +"ERROR DETECTED, resending last fragment" + Fore.RESET)
@@ -450,7 +450,7 @@ def keep_alive_sender(conn, interval):
         return
 
 def save_file(file_name, recived_data_bytes):
-    save_path = input("path to save file: ")
+    save_path = input("press enter and type path to save file: ")
     # Write the bytes to a file
     with open(save_path + file_name, 'wb') as file:
         file.write(recived_data_bytes)
@@ -587,15 +587,17 @@ def gui():
     host = '192.168.1.14'
     port = 12345;
     conn = None
-
+    command_lambda = lambda: (
+        print("0 = set up config"),
+        print("1 = start connection"),
+        print("2 = send text"),
+        print("3 = send file"),
+        print("4 = end connection"),
+        print("5 = change fragment size(default = 1469)"),
+        print("h = print menu")
+    )
+    command_lambda()
     while (1):
-        print("0 = set up config")
-        print("1 = start connection")
-        print("2 = send text")
-        print("3 = send file")
-        print("4 = end connection")
-        print("5 = change fragment size(default = 1469)")
-        print("6 = send text")
 
         user_input = input("Select function: ")
         print(user_input)
@@ -624,6 +626,15 @@ def gui():
             conn = connection_queue.get()
             connection_queue.put(conn)
 
+        elif user_input == '2':
+
+            # Retrieve the connection from the queue
+            print(type(conn))
+            if conn:
+                message = input("Message to peer: ")
+                send_thread = threading.Thread(target=send_text, args=(conn, message,))
+                send_thread.start()
+
         elif user_input == '3':
             # Retrieve the connection from the queue
             conn = connection_queue.get()
@@ -650,16 +661,11 @@ def gui():
             else:
                 print("frag size not supported, frag size set to default!")
 
-        elif user_input == '6':
-
-            # Retrieve the connection from the queue
-            print(type(conn))
-            if conn:
-                message = input("Message to peer: ")
-                send_thread = threading.Thread(target=send_text, args=(conn, message,))
-                send_thread.start()
+        elif user_input == 'h':
+            command_lambda()
 
         else:
+            print("command does not exist!")
             continue
 
 
