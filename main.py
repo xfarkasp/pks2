@@ -18,10 +18,12 @@ frag_size = 1469
 data_ack = threading.Event()
 fyn = threading.Event()
 keep_alive_event = threading.Event()
+data_sent = threading.Event()
 
 error_detected = False
 was_listening = False
 data_transfer = False
+data_ack_time_out = False
 
 
 def create_connection(host, port):
@@ -41,7 +43,12 @@ def create_connection(host, port):
         print("Waiting for ACK message...")
 
         # Receive the acknowledgment
-        ack_header = s.recv(22)
+        try:
+            ack_header = s.recv(22)
+        except ConnectionResetError:
+            print("Host is not listening")
+            return
+
         if not ack_header:
             print("Error: No data received or connection closed.")
         else:
@@ -121,6 +128,29 @@ def wait_for_syn(host, port):
         print(f"Connection refused from the host: {host}")
 
 
+def data_ack_timer():
+    global data_ack_time_out, data_ack, data_sent
+    start_time = time.time()
+    while data_sent.is_set() is not True:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+
+        if data_ack.wait(timeout=max(0, 1 - elapsed_time)):
+            # Keep-alive event is set
+            start_time = time.time()
+
+        else:
+            if data_sent.is_set():
+                data_sent.clear()
+                return
+
+            print("data ack timeout")
+            data_ack_time_out = True
+            data_ack.set()
+
+        time.sleep(0.1)
+
+
 def send_text(conn, message):
     peer_address, local_port = conn.getsockname()
     print(f"local port: {local_port}")
@@ -132,26 +162,52 @@ def send_text(conn, message):
     print(f"send header: {header}")
     conn.sendto(header, peer)
     tmp_message = message
-    global error_detected, data_ack
+    global error_detected, data_ack, data_sent
+
+    time_out_thread = threading.Thread(target=data_ack_timer)
+    time_out_thread.start()
 
     while tmp_message:
         string_buffer = tmp_message[:frag_size]
         # Update the source string by removing the characters that were read
         tmp_message = tmp_message[frag_size:]
         message_header = create_header(6, 0, 0, string_buffer)
-        conn.sendto(message_header, peer)
+        try:
+            conn.sendto(message_header, peer)
+        except OSError:
+            print("connection was closed during transfer")
+            return
         print("chunk sent, waiting for ack/nack")
         data_ack.wait()
         if error_detected is not True:
-            print("continue sending")
+            print(Fore.GREEN + "continue sending" + Fore.RESET)
+        elif data_ack_time_out is True:
+            print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
+            conn.sendto(message_header, peer)
+            data_ack_time_out = False
         else:
-            print("resending last fragment")
+            print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
             error_detected = False
+    data_sent.set()
+    time_out_thread.join()
 
 
 def send_file(conn, filename):
     try:
+        data_to_send = b''
+        # Open the file in binary mode
+
+        with open(filename, 'rb') as file:
+            while True:
+                chunk = file.read(frag_size)
+                if not chunk:
+                    # End of file reached
+                    break
+
+                data_to_send += chunk
+        data_to_send = data_to_send[::-1]
+
         peer_address, local_port = conn.getsockname()
         print(f"local port: {local_port}")
         print(f"remote port: {remote_port}")
@@ -160,29 +216,62 @@ def send_file(conn, filename):
         header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
-        global error_detected, data_ack
-        # Open the file in binary mode
-        with open(filename, 'rb') as file:
+        global error_detected, data_ack, data_ack_time_out, data_sent
+        data_sent.clear()
+        data_ack_time_out = False
+        data_ack.clear()
+        error_detected = False
+        time_out_thread = threading.Thread(target=data_ack_timer)
+        time_out_thread.start()
 
-            # Read and send file data in chunks along with the header
-            while True:
-                chunk = file.read(frag_size)
-                if not chunk:
-                    break
-                data_header = create_header(5, 0, 0, chunk)
+
+
+        frag_counter = 0
+        total_bytes = 0
+        while True:
+            frag_counter += 1
+            chunk = data_to_send[(frag_counter - 1) * frag_size : frag_counter * frag_size]
+            if not chunk:
+                break
+            data_header = create_header(5, 0, 0, chunk)
+            try:
                 conn.sendto(data_header, peer)
-                print("chunk sent, waiting for ack/nack")
-                data_ack.wait()
-                if error_detected is not True:
-                    print("continue sending")
-                else:
-                    print("resending last fragment")
-                    conn.sendto(data_header, peer)
-                    error_detected = False
+            except OSError:
+                print("connection was closed during transfer")
+                return
 
-                data_ack.clear()
+            print(f"chunk {frag_counter} sent, waiting for ack/nack")
+            data_ack.wait()
 
+            if error_detected is not True and data_ack_time_out is not True:
+                print("continue sending")
+
+            elif data_ack_time_out is True and data_sent.is_set() is not True:
+                while data_ack_time_out is True:
+                    if data_sent.is_set():
+                        break
+
+                    print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
+                    retrans_header = create_header(5, 1, 0, chunk)
+                    try:
+                        conn.sendto(retrans_header, peer)
+                    except OSError:
+                        return
+                    time.sleep(2)
+
+            else:
+                print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
+                conn.sendto(data_header, peer)
+                error_detected = False
+
+            data_ack_time_out = False
+            data_ack.clear()
+
+            total_bytes += len(chunk)
+            print(f"bytes sent: {total_bytes}")
         print(f"File {filename} sent successfully: ")
+        data_sent.set()
+        time_out_thread.join()
 
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
@@ -200,7 +289,7 @@ def receive(conn):
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack, keep_alive_event
+        global error_detected, data_ack, keep_alive_event, data_ack_time_out, data_sent
         start_time = time.time()
         while conn:
 
@@ -229,6 +318,7 @@ def receive(conn):
             if type == 2:
                 print(f"NACK recived")
                 error_detected = True
+                data_ack_time_out = False
                 data_ack.set()
 
             if type == 3:
@@ -240,6 +330,7 @@ def receive(conn):
             if type == 4:
                 keep_alive_event.set()
                 print("ack to data recv")
+                data_ack_time_out = False
                 data_ack.set()
 
             if type == 5:
@@ -260,14 +351,14 @@ def receive(conn):
                 total_frags = round(file_size / frag_size)
                 remaining_bytes = file_size
                 recived_data_bytes = b''
+                prev_chunk = b''
                 error_timer = 0
                 while remaining_bytes > 0:
                     error_timer += 1
                     try:
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
-                        print("connection timed out during data transfer")
-                        break
+                        return
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
                     if error_timer == 6:
@@ -278,22 +369,45 @@ def receive(conn):
                             chunk = decoded_header[3]
                             if not chunk:
                                 continue
+                            retransmited_flag = False
+                            if decoded_header[1] == 1:
+                                retransmited_flag = True
+                                print(Fore.RED + f"The sender hasn't recived ack for frag {frag_counter} in time" + Fore.RESET)
+                                if chunk == prev_chunk:
+                                    recived_data_bytes = recived_data_bytes[:-len(chunk)]
+                                    remaining_bytes += len(prev_chunk)
+                                    print("duplicit frame")
+                                else:
+                                    print("not duplicit frame")
 
+                            prev_chunk = chunk
                             frag_counter += 1
-                            print(f"--------------------------\n"
+
+                            text = (f"--------------------------\n"
                                   f"Fragmet: {frag_counter}/{total_frags}\n"
                                   f"Bytes recivded: {len(chunk)}\n"
+                                  f"Remaining bytrs: {remaining_bytes - len(chunk)}/{file_size}\n"
                                   f"--------------------------")
+                            if retransmited_flag:
+                                print(Fore.YELLOW + text + Fore.RESET)
+                            else:
+                                print(text)
                             recived_data_bytes += chunk
                             remaining_bytes -= len(chunk)
                             ack_header = create_header(4, 0, 0)
 
-                            conn.sendto(ack_header, peer_sender)
-                            print("ack sent to chunk")
+                            try:
+                                conn.sendto(ack_header, peer_sender)
+                                print("ACK sent to chunk")
+                            except OSError:
+                                print("Connection timed out during ACK. Resending last fragment.")
+                                conn.sendto(ack_header, peer)
+                                continue  # Retry sending the ACK
                     else:
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
+
                 save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
                 save_thread.start()
 
@@ -384,13 +498,15 @@ def keep_alive_sender(conn, interval):
         print("socket was closed")
         return
 
+
 def save_file(file_name, recived_data_bytes):
-    save_path = input("path to save file: ")
+    save_path = input("press enter and type path to save file: ")
     # Write the bytes to a file
     with open(save_path + file_name, 'wb') as file:
         file.write(recived_data_bytes)
 
     print("File received successfully to " + save_path + file_name)
+
 
 def calculate_crc16(data):
     crc = 0xFFFF
@@ -463,7 +579,8 @@ def decode_header(encoded_header, simulate_error=False):
         # Randomly choose a position to invert
         position_to_invert = random.randint(0, min(4, len(type_bits) - 1))
         # Invert the chosen bit
-        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[position_to_invert + 1:]
+        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[
+                                                                                                              position_to_invert + 1:]
 
     # Decoding each component
     decoded_type = int(type_bits, 2)
@@ -494,9 +611,11 @@ def keep_alive_handler():
             # 15 seconds passed without keep-alive
             if fyn.is_set():
                 return
-            print(Fore.RED + f"{current_time - start_time} seconds has passed from last keep alive/ACK terminating connection")
+            print(
+                Fore.RED + f"{current_time - start_time} seconds has passed from last keep alive/ACK terminating connection")
             universal_termination()
             return
+
 
 def universal_termination():
     global fyn
@@ -522,15 +641,18 @@ def gui():
     host = '192.168.1.14'
     port = 12345;
     conn = None
+    command_lambda = lambda: (
+        print("0 = set up config"),
+        print("1 = start connection"),
+        print("2 = send text"),
+        print("3 = send file"),
+        print("4 = end connection"),
+        print("5 = change fragment size(default = 1469)"),
+        print("h = print menu")
+    )
+    command_lambda()
 
     while (1):
-        print("0 = set up config")
-        print("1 = start connection")
-        print("2 = send text")
-        print("3 = send file")
-        print("4 = end connection")
-        print("5 = change fragment size(default = 1469)")
-        print("6 = send text")
 
         user_input = input("Select function: ")
         print(user_input)
@@ -553,11 +675,24 @@ def gui():
 
         elif user_input == '1':
             # Server (receiver) side
-            host = input("Select IP to connect to: ")
-            port = int(input("Select the PORT of the receiver: "))
+            try:
+                host = input("Select IP to connect to: ")
+                port = int(input("Select the PORT of the receiver: "))
+            except ValueError:
+                print("invalid input")
+                continue
             create_connection(host, port)
             conn = connection_queue.get()
             connection_queue.put(conn)
+
+        elif user_input == '2':
+
+            # Retrieve the connection from the queue
+            print(type(conn))
+            if conn:
+                message = input("Message to peer: ")
+                send_thread = threading.Thread(target=send_text, args=(conn, message,))
+                send_thread.start()
 
         elif user_input == '3':
             # Retrieve the connection from the queue
@@ -585,16 +720,11 @@ def gui():
             else:
                 print("frag size not supported, frag size set to default!")
 
-        elif user_input == '6':
-
-            # Retrieve the connection from the queue
-            print(type(conn))
-            if conn:
-                message = input("Message to peer: ")
-                send_thread = threading.Thread(target=send_text, args=(conn, message,))
-                send_thread.start()
+        elif user_input == 'h':
+            command_lambda()
 
         else:
+            print("command does not exist!")
             continue
 
 
