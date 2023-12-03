@@ -43,7 +43,12 @@ def create_connection(host, port):
         print("Waiting for ACK message...")
 
         # Receive the acknowledgment
-        ack_header = s.recv(22)
+        try:
+            ack_header = s.recv(22)
+        except ConnectionResetError:
+            print("Host is not listening")
+            return
+
         if not ack_header:
             print("Error: No data received or connection closed.")
         else:
