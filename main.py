@@ -330,7 +330,7 @@ def receive(conn):
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
                         print("connection timed out during data transfer")
-                        break
+                        return
 
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
@@ -357,7 +357,7 @@ def receive(conn):
                                 print("ACK sent to chunk")
                             except OSError:
                                 print("Connection timed out during ACK. Resending last fragment.")
-                                conn.sendto(ack_header, peer)
+                                #conn.sendto(ack_header, peer)
                                 continue  # Retry sending the ACK
                     else:
                         nack_header = create_header(2, 0, 0)
