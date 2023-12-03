@@ -326,14 +326,13 @@ def receive(conn):
                 total_frags = round(file_size / frag_size)
                 remaining_bytes = file_size
                 recived_data_bytes = b''
+                prev_chunk = b''
                 error_timer = 0
                 while remaining_bytes > 0:
                     error_timer += 1
-                    try:
-                        data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
-                    except OSError:
-                        print("connection timed out during data transfer")
-                        return
+
+                    data_header = conn.recv(1500)
+
 
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
@@ -345,12 +344,28 @@ def receive(conn):
                             chunk = decoded_header[3]
                             if not chunk:
                                 continue
+                            retransmited_flag = False
+                            if decoded_header[1] == 1:
+                                retransmited_flag = True
+                                print(Fore.RED + f"The sender hasn't recived ack for frag {frag_counter} in time" + Fore.RESET)
+                                if chunk == prev_chunk:
+                                    recived_data_bytes = recived_data_bytes[:-len(chunk)]
+                                    remaining_bytes += len(chunk)
+                                    print("duplicit frame")
+                                else:
+                                    print("not duplicit frame")
 
+                            prev_chunk = chunk
                             frag_counter += 1
-                            print(f"--------------------------\n"
+
+                            text = (f"--------------------------\n"
                                   f"Fragmet: {frag_counter}/{total_frags}\n"
                                   f"Bytes recivded: {len(chunk)}\n"
                                   f"--------------------------")
+                            if retransmited_flag:
+                                print(Fore.YELLOW + text + Fore.RESET)
+                            else:
+                                print(text)
                             recived_data_bytes += chunk
                             remaining_bytes -= len(chunk)
                             ack_header = create_header(4, 0, 0)
@@ -360,7 +375,7 @@ def receive(conn):
                                 print("ACK sent to chunk")
                             except OSError:
                                 print("Connection timed out during ACK. Resending last fragment.")
-                                #conn.sendto(ack_header, peer)
+                                conn.sendto(ack_header, peer)
                                 continue  # Retry sending the ACK
                     else:
                         nack_header = create_header(2, 0, 0)
