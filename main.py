@@ -5,6 +5,7 @@ import time
 import random
 from queue import Queue
 from colorama import Fore, init
+
 init()
 
 local_port = 666
@@ -12,15 +13,12 @@ local_port = 666
 remote_addr = 'localhost'
 remote_port = 0
 
-
 frag_size = 1469
-
 
 data_ack = threading.Event()
 fyn = threading.Event()
 keep_alive_event = threading.Event()
 data_sent = threading.Event()
-
 
 error_detected = False
 was_listening = False
@@ -161,7 +159,7 @@ def send_text(conn, message):
     tmp_message = message
     global error_detected, data_ack, data_sent
 
-    time_out_thread = threading.Thread(target = data_ack_timer)
+    time_out_thread = threading.Thread(target=data_ack_timer)
     time_out_thread.start()
 
     while tmp_message:
@@ -183,11 +181,12 @@ def send_text(conn, message):
             conn.sendto(message_header, peer)
             data_ack_time_out = False
         else:
-            print(Fore.YELLOW +"ERROR DETECTED, resending last fragment" + Fore.RESET)
+            print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
             error_detected = False
     data_sent.set()
     time_out_thread.join()
+
 
 def send_file(conn, filename):
     try:
@@ -351,7 +350,7 @@ def receive(conn):
                                 print("ACK sent to chunk")
                             except OSError:
                                 print("Connection timed out during ACK. Resending last fragment.")
-                                conn.sendto(data_header, peer)
+                                conn.sendto(ack_header, peer)
                                 continue  # Retry sending the ACK
                     else:
                         nack_header = create_header(2, 0, 0)
@@ -449,6 +448,7 @@ def keep_alive_sender(conn, interval):
         print("socket was closed")
         return
 
+
 def save_file(file_name, recived_data_bytes):
     save_path = input("press enter and type path to save file: ")
     # Write the bytes to a file
@@ -456,6 +456,7 @@ def save_file(file_name, recived_data_bytes):
         file.write(recived_data_bytes)
 
     print("File received successfully to " + save_path + file_name)
+
 
 def calculate_crc16(data):
     crc = 0xFFFF
@@ -528,7 +529,8 @@ def decode_header(encoded_header, simulate_error=False):
         # Randomly choose a position to invert
         position_to_invert = random.randint(0, min(4, len(type_bits) - 1))
         # Invert the chosen bit
-        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[position_to_invert + 1:]
+        type_bits = type_bits[:position_to_invert] + ('0' if type_bits[position_to_invert] == '1' else '1') + type_bits[
+                                                                                                              position_to_invert + 1:]
 
     # Decoding each component
     decoded_type = int(type_bits, 2)
@@ -559,9 +561,11 @@ def keep_alive_handler():
             # 15 seconds passed without keep-alive
             if fyn.is_set():
                 return
-            print(Fore.RED + f"{current_time - start_time} seconds has passed from last keep alive/ACK terminating connection")
+            print(
+                Fore.RED + f"{current_time - start_time} seconds has passed from last keep alive/ACK terminating connection")
             universal_termination()
             return
+
 
 def universal_termination():
     global fyn
