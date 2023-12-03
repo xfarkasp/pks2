@@ -206,6 +206,7 @@ def send_file(conn, filename):
                     break
 
                 data_to_send += chunk
+        data_to_send = data_to_send[::-1]
 
         peer_address, local_port = conn.getsockname()
         print(f"local port: {local_port}")
@@ -226,6 +227,7 @@ def send_file(conn, filename):
 
 
         frag_counter = 0
+        total_bytes = 0
         while True:
             frag_counter += 1
             chunk = data_to_send[(frag_counter - 1) * frag_size : frag_counter * frag_size]
@@ -262,6 +264,8 @@ def send_file(conn, filename):
             data_ack_time_out = False
             data_ack.clear()
 
+            total_bytes += len(chunk)
+            print(f"bytes sent: {total_bytes}")
         print(f"File {filename} sent successfully: ")
         data_sent.set()
         time_out_thread.join()
@@ -349,8 +353,7 @@ def receive(conn):
                 while remaining_bytes > 0:
                     error_timer += 1
 
-                    data_header = conn.recv(1500)
-
+                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
 
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
@@ -644,6 +647,7 @@ def gui():
         print("h = print menu")
     )
     command_lambda()
+
     while (1):
 
         user_input = input("Select function: ")
@@ -667,8 +671,12 @@ def gui():
 
         elif user_input == '1':
             # Server (receiver) side
-            host = input("Select IP to connect to: ")
-            port = int(input("Select the PORT of the receiver: "))
+            try:
+                host = input("Select IP to connect to: ")
+                port = int(input("Select the PORT of the receiver: "))
+            except ValueError:
+                print("invalid input")
+                continue
             create_connection(host, port)
             conn = connection_queue.get()
             connection_queue.put(conn)
