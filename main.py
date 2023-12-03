@@ -190,6 +190,18 @@ def send_text(conn, message):
 
 def send_file(conn, filename):
     try:
+        data_to_send = b''
+        # Open the file in binary mode
+
+        with open(filename, 'rb') as file:
+            while True:
+                chunk = file.read(frag_size)
+                if not chunk:
+                    # End of file reached
+                    break
+
+                data_to_send += chunk
+
         peer_address, local_port = conn.getsockname()
         print(f"local port: {local_port}")
         print(f"remote port: {remote_port}")
@@ -205,49 +217,50 @@ def send_file(conn, filename):
         error_detected = False
         time_out_thread = threading.Thread(target=data_ack_timer)
         time_out_thread.start()
-        # Open the file in binary mode
-        with open(filename, 'rb') as file:
-            frag_counter = 0
-            # Read and send file data in chunks along with the header
-            while True:
-                frag_counter += 1
-                chunk = file.read(frag_size)
-                if not chunk:
-                    break
-                data_header = create_header(5, 0, 0, chunk)
-                try:
-                    conn.sendto(data_header, peer)
-                except OSError:
-                    print("connection was closed during transfer")
-                    return
 
-                print(f"chunk {frag_counter} sent, waiting for ack/nack")
-                data_ack.wait()
 
-                if error_detected is not True and data_ack_time_out is not True:
-                    print("continue sending")
 
-                elif data_ack_time_out is True and data_sent.is_set() is not True:
-                    while data_ack_time_out is True:
-                        if data_sent.is_set():
-                            break
+        frag_counter = 0
+        while True:
+            frag_counter += 1
+            chunk = data_to_send[(frag_counter - 1) * frag_size : frag_counter * frag_size]
+            if not chunk:
+                break
+            data_header = create_header(5, 0, 0, chunk)
+            try:
+                conn.sendto(data_header, peer)
+            except OSError:
+                print("connection was closed during transfer")
+                return
 
-                        print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
-                        retrans_header = create_header(5, 1, 0, chunk)
-                        conn.sendto(retrans_header, peer)
-                        time.sleep(2)
+            print(f"chunk {frag_counter} sent, waiting for ack/nack")
+            data_ack.wait()
 
-                else:
-                    print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
-                    conn.sendto(data_header, peer)
-                    error_detected = False
+            if error_detected is not True and data_ack_time_out is not True:
+                print("continue sending")
 
-                data_ack_time_out = False
-                data_ack.clear()
+            elif data_ack_time_out is True and data_sent.is_set() is not True:
+                while data_ack_time_out is True:
+                    if data_sent.is_set():
+                        break
+
+                    print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
+                    retrans_header = create_header(5, 1, 0, chunk)
+                    conn.sendto(retrans_header, peer)
+                    time.sleep(2)
+
+            else:
+                print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
+                conn.sendto(data_header, peer)
+                error_detected = False
+
+            data_ack_time_out = False
+            data_ack.clear()
 
         print(f"File {filename} sent successfully: ")
         data_sent.set()
         time_out_thread.join()
+
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
 
@@ -350,7 +363,7 @@ def receive(conn):
                                 print(Fore.RED + f"The sender hasn't recived ack for frag {frag_counter} in time" + Fore.RESET)
                                 if chunk == prev_chunk:
                                     recived_data_bytes = recived_data_bytes[:-len(chunk)]
-                                    remaining_bytes += len(chunk)
+                                    remaining_bytes += len(prev_chunk)
                                     print("duplicit frame")
                                 else:
                                     print("not duplicit frame")
@@ -361,6 +374,7 @@ def receive(conn):
                             text = (f"--------------------------\n"
                                   f"Fragmet: {frag_counter}/{total_frags}\n"
                                   f"Bytes recivded: {len(chunk)}\n"
+                                  f"Remaining bytrs: {remaining_bytes}/{file_size}\n"
                                   f"--------------------------")
                             if retransmited_flag:
                                 print(Fore.YELLOW + text + Fore.RESET)
