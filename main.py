@@ -199,7 +199,10 @@ def send_file(conn, filename):
         print(f"send header: {header}")
         conn.sendto(header, peer)
         global error_detected, data_ack, data_ack_time_out, data_sent
-
+        data_sent.clear()
+        data_ack_time_out = False
+        data_ack.clear()
+        error_detected = False
         time_out_thread = threading.Thread(target=data_ack_timer)
         time_out_thread.start()
         # Open the file in binary mode
