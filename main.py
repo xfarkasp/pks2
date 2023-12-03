@@ -374,7 +374,7 @@ def receive(conn):
                             text = (f"--------------------------\n"
                                   f"Fragmet: {frag_counter}/{total_frags}\n"
                                   f"Bytes recivded: {len(chunk)}\n"
-                                  f"Remaining bytrs: {remaining_bytes}/{file_size}\n"
+                                  f"Remaining bytrs: {remaining_bytes - len(chunk)}/{file_size}\n"
                                   f"--------------------------")
                             if retransmited_flag:
                                 print(Fore.YELLOW + text + Fore.RESET)
