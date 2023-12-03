@@ -359,7 +359,6 @@ def receive(conn):
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
                         return
-
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
                     if error_timer == 6:
