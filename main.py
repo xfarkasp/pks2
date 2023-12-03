@@ -216,6 +216,7 @@ def send_file(conn, filename):
                 except OSError:
                     print("connection was closed during transfer")
                     return
+
                 print("chunk sent, waiting for ack/nack")
                 data_ack.wait()
 
@@ -224,6 +225,9 @@ def send_file(conn, filename):
 
                 elif data_ack_time_out is True and data_sent is not True:
                     while data_ack_time_out is True:
+                        if data_sent.is_set():
+                            break
+
                         print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
                         conn.sendto(data_header, peer)
                         time.sleep(1)
@@ -323,7 +327,7 @@ def receive(conn):
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
                         print("connection timed out during data transfer")
-                        return
+                        break
 
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
