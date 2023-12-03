@@ -361,7 +361,6 @@ def receive(conn):
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
 
-                data_sent.set()
                 save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
                 save_thread.start()
 
