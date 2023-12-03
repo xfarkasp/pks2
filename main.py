@@ -126,7 +126,7 @@ def wait_for_syn(host, port):
 def data_ack_timer():
     global data_ack_time_out, data_ack, data_sent
     start_time = time.time()
-    while True:
+    while data_sent.is_set() is not True:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
