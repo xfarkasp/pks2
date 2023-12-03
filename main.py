@@ -253,7 +253,10 @@ def send_file(conn, filename):
 
                     print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
                     retrans_header = create_header(5, 1, 0, chunk)
-                    conn.sendto(retrans_header, peer)
+                    try:
+                        conn.sendto(retrans_header, peer)
+                    except OSError:
+                        return
                     time.sleep(2)
 
             else:
@@ -352,8 +355,10 @@ def receive(conn):
                 error_timer = 0
                 while remaining_bytes > 0:
                     error_timer += 1
-
-                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    try:
+                        data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    except OSError:
+                        return
 
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
