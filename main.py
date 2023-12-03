@@ -207,9 +207,10 @@ def send_file(conn, filename):
         time_out_thread.start()
         # Open the file in binary mode
         with open(filename, 'rb') as file:
-
+            frag_counter = 0
             # Read and send file data in chunks along with the header
             while True:
+                frag_counter += 1
                 chunk = file.read(frag_size)
                 if not chunk:
                     break
@@ -220,23 +221,24 @@ def send_file(conn, filename):
                     print("connection was closed during transfer")
                     return
 
-                print("chunk sent, waiting for ack/nack")
+                print(f"chunk {frag_counter} sent, waiting for ack/nack")
                 data_ack.wait()
 
                 if error_detected is not True and data_ack_time_out is not True:
                     print("continue sending")
 
-                elif data_ack_time_out is True and data_sent is not True:
+                elif data_ack_time_out is True and data_sent.is_set() is not True:
                     while data_ack_time_out is True:
                         if data_sent.is_set():
                             break
 
-                        print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
-                        conn.sendto(data_header, peer)
-                        time.sleep(1)
+                        print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
+                        retrans_header = create_header(5, 1, 0, chunk)
+                        conn.sendto(retrans_header, peer)
+                        time.sleep(2)
 
                 else:
-                    print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
+                    print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
                     conn.sendto(data_header, peer)
                     error_detected = False
 
@@ -291,6 +293,7 @@ def receive(conn):
             if type == 2:
                 print(f"NACK recived")
                 error_detected = True
+                data_ack_time_out = False
                 data_ack.set()
 
             if type == 3:
