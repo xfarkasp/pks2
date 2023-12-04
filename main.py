@@ -193,7 +193,7 @@ def send_text(conn, message):
                     break
 
                 print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
-                retrans_header = create_header(6, 1, 0, string_buffer)
+                retrans_header = create_header(6, 0, 0, string_buffer)
                 try:
                     conn.sendto(retrans_header, peer)
                 except OSError:
@@ -202,14 +202,16 @@ def send_text(conn, message):
         else:
             data_ack.clear()
             print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
-
+            retrans_header = create_header(6, 0, 0, string_buffer)
             try:
-                conn.sendto(message_header, peer)
+                conn.sendto(retrans_header, peer)
             except OSError:
                 return
             error_detected = False
             data_ack.wait()
 
+        data_ack_time_out = False
+        data_ack.clear()
 
     data_sent.set()
     time_out_thread.join()
@@ -235,7 +237,7 @@ def send_file(conn, filename):
         print(f"remote port: {remote_port}")
         peer = (remote_addr, remote_port)
 
-        header = create_header(5, 0, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
+        header = create_header(5, 2, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
         print(f"send header: {header}")
         conn.sendto(header, peer)
         global error_detected, data_ack, data_ack_time_out, data_sent
@@ -451,16 +453,16 @@ def receive(conn):
                 remaining_bytes = message_size
                 recived_data_bytes = b''
                 prev_chunk = b''
-                all_frags = 0
+                all_frags_recived = 0
                 while remaining_bytes > 0:
-                    all_frags += 1
+                    all_frags_recived += 1
                     try:
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
                         return
 
                     decoded_header = decode_header(data_header)
-                    if all_frags % 6 == 0:
+                    if sim_error_flag is True and all_frags_recived % 6 == 0:
                         decoded_header = decode_header(data_header, True)
 
                     if decoded_header is not None:
@@ -486,6 +488,7 @@ def receive(conn):
                             print(f"--------------------------\n"
                                   f"Fragmet: {frag_counter}/{total_frags}\n"
                                   f"Bytes recivded: {len(chunk)}\n"
+                                  f"Remaining bytrs: {remaining_bytes - len(chunk)}/{message_size}\n"
                                   f"--------------------------")
 
                             recived_data_bytes += chunk
@@ -499,7 +502,8 @@ def receive(conn):
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
 
-                print(recived_data_bytes)
+                print(f"Message received: {recived_data_bytes}")
+                print(f"Sum of frags received: {all_frags_recived}")
 
             if type == 7:
                 print("Fyn received, sending ACK and terminating")
