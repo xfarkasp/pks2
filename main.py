@@ -161,6 +161,7 @@ def send_text(conn, message):
 
     print(f"send header: {header}")
     conn.sendto(header, peer)
+    time.sleep(5)
     tmp_message = message
     global error_detected, data_ack, data_ack_time_out, data_sent
     data_sent.clear()
@@ -183,8 +184,8 @@ def send_text(conn, message):
             return
         print("chunk sent, waiting for ack/nack")
         data_ack.wait()
-        if error_detected is not True:
-            print(Fore.GREEN + "continue sending" + Fore.RESET)
+        if error_detected is not True and data_ack_time_out is not True:
+            print(Fore.GREEN + "ACK received, continue sending" + Fore.RESET)
 
         elif data_ack_time_out is True and data_sent.is_set() is not True:
             while data_ack_time_out is True:
@@ -202,6 +203,7 @@ def send_text(conn, message):
             print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
             error_detected = False
+
     data_sent.set()
     time_out_thread.join()
 
@@ -327,7 +329,6 @@ def receive(conn):
                     return
 
             if type == 2:
-                print(f"NACK recived")
                 error_detected = True
                 data_ack_time_out = False
                 data_ack.set()
@@ -340,7 +341,6 @@ def receive(conn):
 
             if type == 4:
                 keep_alive_event.set()
-                print("ack to data recv")
                 data_ack_time_out = False
                 data_ack.set()
 
@@ -717,6 +717,8 @@ def gui():
         elif user_input == '2':
 
             # Retrieve the connection from the queue
+            conn = connection_queue.get()
+            connection_queue.put(conn)
             print(type(conn))
             if conn:
                 message = input("Message to peer: ")
