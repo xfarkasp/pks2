@@ -273,15 +273,22 @@ def send_file(conn, filename):
                     time.sleep(2)
 
             else:
+                data_ack.clear()
                 print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
-                conn.sendto(data_header, peer)
+                retrans_header = create_header(5, 1, 0, chunk)
+                try:
+                    conn.sendto(retrans_header, peer)
+                except OSError:
+                    return
                 error_detected = False
+                data_ack.wait()
 
             data_ack_time_out = False
             data_ack.clear()
 
             total_bytes += len(chunk)
             print(f"bytes sent: {total_bytes}")
+
         print(f"File {filename} sent successfully: ")
         data_sent.set()
         time_out_thread.join()
@@ -363,16 +370,16 @@ def receive(conn):
                 remaining_bytes = file_size
                 recived_data_bytes = b''
                 prev_chunk = b''
-                error_timer = 0
+                all_frags_recived = 0
                 while remaining_bytes > 0:
-                    error_timer += 1
+                    all_frags_recived += 1
                     try:
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
                         return
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
-                    if error_timer == 6:
+                    if all_frags_recived % 6 == 0:
                         decoded_header = decode_header(data_header, True)
 
                     if decoded_header is not None:
@@ -418,7 +425,7 @@ def receive(conn):
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
-
+                print(f"Total frags received during transfer: {all_frags_recived}")
                 save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
                 save_thread.start()
 
@@ -435,16 +442,16 @@ def receive(conn):
                 remaining_bytes = message_size
                 recived_data_bytes = b''
                 prev_chunk = b''
-                error_timer = 0
+                all_frags = 0
                 while remaining_bytes > 0:
-                    error_timer += 1
+                    all_frags += 1
                     try:
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
                         return
 
                     decoded_header = decode_header(data_header)
-                    if error_timer == 6:
+                    if all_frags % 6 == 0:
                         decoded_header = decode_header(data_header, True)
 
                     if decoded_header is not None:
