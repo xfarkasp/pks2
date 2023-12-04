@@ -389,7 +389,7 @@ def receive(conn):
                         return
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
-                    print(f"sim flag: {sim_error_flag}")
+
                     if sim_error_flag is True and all_frags_recived % 6 == 0:
                         decoded_header = decode_header(data_header, True)
 
@@ -635,11 +635,12 @@ def decode_header(encoded_header, simulate_error=False):
     decoded_type = int(type_bits, 2)
     decoded_seq = int(seq_bits, 2)
     decoded_crc = int(crc_bits, 2)
-
-    if calculate_crc16(int(crc_check_bits, 2).to_bytes(1, byteorder='big') + data_bytes) != int(crc_bits, 2):
-        print(f"corrupted datagram")
+    FCS = calculate_crc16(int(crc_check_bits, 2).to_bytes(1, byteorder='big') + data_bytes)
+    if FCS != int(crc_bits, 2):
+        print(f"corrupted datagram: header crc: {decoded_crc}, FCS: {FCS}")
         return None
-
+    if decoded_type == 5 or decoded_type == 6:
+        print("CRC OK")
     return decoded_type, decoded_seq, decoded_crc, data_bytes
 
 
@@ -710,7 +711,8 @@ def gui():
         if user_input == '0':
             hostname = socket.getfqdn()
             try:
-                ip = socket.gethostbyname_ex(hostname)[2][1]
+                print(hostname)
+                ip = socket.gethostbyname_ex(hostname)[2][0]
                 print(f"local ip: {ip}")
                 port = int(input("Select port to operate on: "))
                 # Start listener for connection
