@@ -162,12 +162,16 @@ def send_text(conn, message):
     print(f"send header: {header}")
     conn.sendto(header, peer)
     tmp_message = message
-    global error_detected, data_ack, data_sent
-
+    global error_detected, data_ack, data_ack_time_out, data_sent
+    data_sent.clear()
+    data_ack_time_out = False
+    data_ack.clear()
+    error_detected = False
     time_out_thread = threading.Thread(target=data_ack_timer)
     time_out_thread.start()
-
+    frag_counter = 0
     while tmp_message:
+        frag_counter +=1
         string_buffer = tmp_message[:frag_size]
         # Update the source string by removing the characters that were read
         tmp_message = tmp_message[frag_size:]
@@ -181,10 +185,19 @@ def send_text(conn, message):
         data_ack.wait()
         if error_detected is not True:
             print(Fore.GREEN + "continue sending" + Fore.RESET)
-        elif data_ack_time_out is True:
-            print(Fore.YELLOW + "DATA ACK TIMEOUT, resending last fragment" + Fore.RESET)
-            conn.sendto(message_header, peer)
-            data_ack_time_out = False
+
+        elif data_ack_time_out is True and data_sent.is_set() is not True:
+            while data_ack_time_out is True:
+                if data_sent.is_set():
+                    break
+
+                print(Fore.YELLOW + f"DATA ACK TIMEOUT, resending {frag_counter} fragment" + Fore.RESET)
+                retrans_header = create_header(6, 1, 0, string_buffer)
+                try:
+                    conn.sendto(retrans_header, peer)
+                except OSError:
+                    return
+                time.sleep(2)
         else:
             print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
             conn.sendto(message_header, peer)
@@ -206,7 +219,7 @@ def send_file(conn, filename):
                     break
 
                 data_to_send += chunk
-        data_to_send = data_to_send[::-1]
+        #data_to_send = data_to_send[::-1]
 
         peer_address, local_port = conn.getsockname()
         print(f"local port: {local_port}")
@@ -223,8 +236,6 @@ def send_file(conn, filename):
         error_detected = False
         time_out_thread = threading.Thread(target=data_ack_timer)
         time_out_thread.start()
-
-
 
         frag_counter = 0
         total_bytes = 0
@@ -423,10 +434,15 @@ def receive(conn):
                 total_frags = round(message_size / frag_size)
                 remaining_bytes = message_size
                 recived_data_bytes = b''
+                prev_chunk = b''
                 error_timer = 0
                 while remaining_bytes > 0:
                     error_timer += 1
-                    data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    try:
+                        data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
+                    except OSError:
+                        return
+
                     decoded_header = decode_header(data_header)
                     if error_timer == 6:
                         decoded_header = decode_header(data_header, True)
@@ -437,6 +453,19 @@ def receive(conn):
                             if not chunk:
                                 continue
 
+                            retransmited_flag = False
+                            if decoded_header[1] == 1:
+                                retransmited_flag = True
+                                print(
+                                    Fore.RED + f"The sender hasn't recived ack for frag {frag_counter} in time" + Fore.RESET)
+                                if chunk == prev_chunk:
+                                    recived_data_bytes = recived_data_bytes[:-len(chunk)]
+                                    remaining_bytes += len(prev_chunk)
+                                    print("duplicit frame")
+                                else:
+                                    print("not duplicit frame")
+
+                            prev_chunk = chunk
                             frag_counter += 1
                             print(f"--------------------------\n"
                                   f"Fragmet: {frag_counter}/{total_frags}\n"
