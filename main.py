@@ -24,7 +24,7 @@ error_detected = False
 was_listening = False
 data_transfer = False
 data_ack_time_out = False
-
+sim_error_flag = False
 
 def create_connection(host, port):
     try:
@@ -161,7 +161,7 @@ def send_text(conn, message):
 
     print(f"send header: {header}")
     conn.sendto(header, peer)
-    time.sleep(5)
+
     tmp_message = message
     global error_detected, data_ack, data_ack_time_out, data_sent
     data_sent.clear()
@@ -200,9 +200,16 @@ def send_text(conn, message):
                     return
                 time.sleep(2)
         else:
-            print(Fore.YELLOW + "ERROR DETECTED, resending last fragment" + Fore.RESET)
-            conn.sendto(message_header, peer)
+            data_ack.clear()
+            print(Fore.YELLOW + f"ERROR DETECTED, resending {frag_counter} fragment" + Fore.RESET)
+
+            try:
+                conn.sendto(message_header, peer)
+            except OSError:
+                return
             error_detected = False
+            data_ack.wait()
+
 
     data_sent.set()
     time_out_thread.join()
@@ -309,7 +316,7 @@ def receive(conn):
         peer_address, peer_port = conn.getsockname()
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
-        global error_detected, data_ack, keep_alive_event, data_ack_time_out, data_sent
+        global error_detected, data_ack, keep_alive_event, data_ack_time_out, data_sent, sim_error_flag
         start_time = time.time()
         while conn:
 
@@ -365,6 +372,7 @@ def receive(conn):
                     print("Recived file: " + file_name)
                     print("Size: " + str(file_size))
 
+
                 frag_counter = 0
                 total_frags = round(file_size / frag_size)
                 remaining_bytes = file_size
@@ -379,7 +387,8 @@ def receive(conn):
                         return
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
-                    if all_frags_recived % 6 == 0:
+                    print(f"sim flag: {sim_error_flag}")
+                    if sim_error_flag is True and all_frags_recived % 6 == 0:
                         decoded_header = decode_header(data_header, True)
 
                     if decoded_header is not None:
@@ -677,6 +686,7 @@ def gui():
     host = '192.168.1.14'
     port = 12345;
     conn = None
+    global sim_error_flag
     command_lambda = lambda: (
         print("0 = set up config"),
         print("1 = start connection"),
@@ -684,6 +694,7 @@ def gui():
         print("3 = send file"),
         print("4 = end connection"),
         print("5 = change fragment size(default = 1469)"),
+        print("5 = turn on error simulation(always use on the receiving node not on sender!)"),
         print("h = print menu")
     )
     command_lambda()
@@ -757,6 +768,15 @@ def gui():
                 frag_size = new_frag_size
             else:
                 print("frag size not supported, frag size set to default!")
+
+        elif user_input == '6':
+
+            if sim_error_flag:
+                sim_error_flag = False
+                print("Error simulation turned off!")
+            else:
+                sim_error_flag = True
+                print("Error simulation turned on!")
 
         elif user_input == 'h':
             command_lambda()
