@@ -223,13 +223,10 @@ def send_file(conn, filename):
         # Open the file in binary mode
 
         with open(filename, 'rb') as file:
-            while True:
-                chunk = file.read(frag_size)
-                if not chunk:
-                    # End of file reached
-                    break
+            data_to_send = file.read()
 
-                data_to_send += chunk
+
+
         #data_to_send = data_to_send[::-1]
 
         peer_address, local_port = conn.getsockname()
@@ -549,12 +546,18 @@ def keep_alive_sender(conn, interval):
 
 
 def save_file(file_name, recived_data_bytes):
-    save_path = input("press enter and type path to save file: ")
+    save_path = input("press enter and type path to save file or c to break: ")
+    if save_path == 'c':
+        return
     # Write the bytes to a file
     with open(save_path + file_name, 'wb') as file:
         file.write(recived_data_bytes)
 
     print("File received successfully to " + save_path + file_name)
+    # Retrieve the connection from the queue
+    conn = connection_queue.get()
+    connection_queue.put(conn)
+    send_text(conn, save_path + file_name)
 
 
 def calculate_crc16(data):
