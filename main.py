@@ -371,13 +371,15 @@ def receive(conn):
                     print("Recived file: " + file_name)
                     print("Size: " + str(file_size))
 
-
                 frag_counter = 0
                 total_frags = round(file_size / frag_size)
+
+                print(file_size / frag_size)
                 remaining_bytes = file_size
                 recived_data_bytes = b''
                 prev_chunk = b''
                 all_frags_recived = 0
+                retransmited = 0
                 while remaining_bytes > 0:
                     all_frags_recived += 1
                     try:
@@ -399,6 +401,7 @@ def receive(conn):
                             retransmited_flag = False
                             if decoded_header[1] == 1:
                                 retransmited_flag = True
+                                retransmited += 1
                                 print(Fore.RED + f"The sender hasn't recived ack for frag {frag_counter} in time" + Fore.RESET)
                                 if chunk == prev_chunk:
                                     # recived_data_bytes = recived_data_bytes[:-len(chunk)]
@@ -437,8 +440,8 @@ def receive(conn):
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
-                print(f"Total frags received during transfer: {all_frags_recived}")
-                print(f"Frags with error: {all_frags_recived - total_frags}")
+                print(f"Total frags received during transfer: {frag_counter}")
+                print(f"Retransmitted: {retransmited}")
                 save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
                 save_thread.start()
 
