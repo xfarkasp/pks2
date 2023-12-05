@@ -733,6 +733,8 @@ def gui():
                 was_listening = True
             except IndexError:
                 print("Media is not connected")
+            except socket.gaierror:
+                print("Get addr failed")
 
         elif user_input == '1':
             # Server (receiver) side
