@@ -438,6 +438,7 @@ def receive(conn):
                         conn.sendto(nack_header, peer_sender)
                         print("NACK sent to chunk")
                 print(f"Total frags received during transfer: {all_frags_recived}")
+                print(f"Frags with error: {all_frags_recived - total_frags}")
                 save_thread = threading.Thread(target=save_file, args=(file_name, recived_data_bytes))
                 save_thread.start()
 
