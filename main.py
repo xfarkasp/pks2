@@ -383,7 +383,8 @@ def receive(conn):
                     try:
                         data_header = conn.recv(min(frag_size + 31, remaining_bytes + 31))
                     except OSError:
-                        return
+                        continue
+
                     decoded_header = decode_header(data_header)
                     keep_alive_event.set()
 
@@ -400,9 +401,10 @@ def receive(conn):
                                 retransmited_flag = True
                                 print(Fore.RED + f"The sender hasn't recived ack for frag {frag_counter} in time" + Fore.RESET)
                                 if chunk == prev_chunk:
-                                    recived_data_bytes = recived_data_bytes[:-len(chunk)]
-                                    remaining_bytes += len(prev_chunk)
+                                    # recived_data_bytes = recived_data_bytes[:-len(chunk)]
+                                    # remaining_bytes += len(prev_chunk)
                                     print("duplicit frame")
+                                    continue
                                 else:
                                     print("not duplicit frame")
 
