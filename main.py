@@ -234,7 +234,7 @@ def send_file(conn, filename):
         print(f"remote port: {remote_port}")
         peer = (remote_addr, remote_port)
 
-        header = create_header(5, 2, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + filename)
+        header = create_header(5, 2, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + os.path.basename(filename))
         print(f"send header: {header}")
         conn.sendto(header, peer)
         global error_detected, data_ack, data_ack_time_out, data_sent
