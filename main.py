@@ -429,6 +429,8 @@ def receive(conn):
                                 print("Connection timed out during ACK. Resending last fragment.")
                                 conn.sendto(ack_header, peer)
                                 continue  # Retry sending the ACK
+                            if len(chunk) < frag_size:
+                                break
                     else:
                         nack_header = create_header(2, 0, 0)
                         conn.sendto(nack_header, peer_sender)
