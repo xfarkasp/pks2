@@ -73,7 +73,6 @@ def create_connection(host, port):
             receive_thread = threading.Thread(target=receive, args=(s,))
             receive_thread.start()
 
-
     except ConnectionRefusedError:
         print(f"Connection refused from the host: " + host)
 
@@ -152,9 +151,6 @@ def data_ack_timer():
 
 
 def send_text(conn, message):
-    peer_address, local_port = conn.getsockname()
-    print(f"local port: {local_port}")
-    print(f"remote port: {remote_port}")
     peer = (remote_addr, remote_port)
 
     header = create_header(6, 0, 0, str(frag_size) + "|" + str(len(message)))
@@ -172,7 +168,7 @@ def send_text(conn, message):
     time_out_thread.start()
     frag_counter = 0
     while tmp_message:
-        frag_counter +=1
+        frag_counter += 1
         string_buffer = tmp_message[:frag_size]
         # Update the source string by removing the characters that were read
         tmp_message = tmp_message[frag_size:]
@@ -219,19 +215,11 @@ def send_text(conn, message):
 
 def send_file(conn, filename):
     try:
-        data_to_send = b''
-        # Open the file in binary mode
-
         with open(filename, 'rb') as file:
             data_to_send = file.read()
 
-
-
         #data_to_send = data_to_send[::-1]
 
-        peer_address, local_port = conn.getsockname()
-        print(f"local port: {local_port}")
-        print(f"remote port: {remote_port}")
         peer = (remote_addr, remote_port)
 
         header = create_header(5, 2, 0, str(frag_size) + "|" + str(os.path.getsize(filename)) + "|" + os.path.basename(filename))
@@ -316,7 +304,6 @@ def receive(conn):
         peer = (peer_address, peer_port)
         peer_sender = (remote_addr, remote_port)
         global error_detected, data_ack, keep_alive_event, data_ack_time_out, data_sent, sim_error_flag
-        start_time = time.time()
         while conn:
 
             signal_received = False
@@ -348,7 +335,6 @@ def receive(conn):
 
             if type == 3:
                 keep_alive_event.set()
-                start_time = time.time()
                 keep_alive_ack_header = create_header(1, 0, 0)
                 conn.sendto(keep_alive_ack_header, (remote_addr, remote_port))
 
@@ -471,7 +457,7 @@ def receive(conn):
                         decoded_header = decode_header(data_header, True)
 
                     if decoded_header is not None:
-                        if (decoded_header[0] == 6):
+                        if decoded_header[0] == 6:
                             chunk = decoded_header[3]
                             if not chunk:
                                 continue
@@ -627,7 +613,7 @@ def decode_header(encoded_header, simulate_error=False):
     if len(encoded_header) > 3:
         data_bits = ''.join(format(byte, '08b') for byte in encoded_header[3:])
         data_bytes = bytes([int(data_bits[i:i + 8], 2) for i in range(0, len(data_bits), 8)])
-        if (simulate_error):
+        if simulate_error:
             # Randomly choose a position to change
             position_to_change = random.randint(0, len(data_bytes) - 1)
             # Randomly generate a new byte
@@ -684,7 +670,7 @@ def universal_termination():
     conn = connection_queue.get()
     conn.close()
 
-    print(Fore.RED + f"Connection timeout, connection terminated" + Fore.RESET)
+    print(Fore.RED + f"Connection ended" + Fore.RESET)
     if was_listening:
         try:
             hostname = socket.getfqdn()
@@ -715,7 +701,7 @@ def gui():
     )
     command_lambda()
 
-    while (1):
+    while True:
 
         user_input = input("Select function: ")
         print(user_input)
